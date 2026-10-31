@@ -59,7 +59,7 @@ It appears in Home Assistant as **"Ezviz Cloud with Video"**.
 ### HACS (custom repository)
 
 1. HACS → ⋮ → **Custom repositories**.
-2. Add `https://github.com/YOUR_GITHUB_USERNAME/ezviz_rtsp` with category
+2. Add `https://github.com/tarasifua/ezviz_rtsp` with category
    **Integration**.
 3. Install **Ezviz Cloud with Video** and restart Home Assistant.
 
