@@ -28,11 +28,16 @@ const HLS_SRI = "sha384-V5ruNBgmYcC3SJRUQeNykAAAgde5gOFq/Hu0CZj7bygDP0yRIhkvX8+w
 // counts from the first frame; this is a separate cap on the wait for it.
 const STARTUP_SECONDS = 45;
 
-// The integration appends its version to the module URL, so the card reports
-// which build is running and it can never drift from the manifest.
+// The integration appends its version (and a content hash) to the module URL,
+// so the card reports which build is running and it can never drift from the
+// manifest. The hash changes on every edit, which is what tells a dev build
+// apart when the version itself is unchanged.
 const CARD_VERSION = (() => {
   try {
-    return new URL(import.meta.url).searchParams.get("version") || "?";
+    const params = new URL(import.meta.url).searchParams;
+    const version = params.get("version") || "?";
+    const build = (params.get("v") || "").slice(0, 8);
+    return build ? `${version}+${build}` : version;
   } catch {
     return "?";
   }
