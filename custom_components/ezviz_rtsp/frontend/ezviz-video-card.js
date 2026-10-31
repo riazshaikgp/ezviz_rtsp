@@ -10,10 +10,12 @@
 //   auto_play: false       # optional; play while the card is on screen
 //   max_seconds: 60        # optional; stop to save battery, 0 = never
 //
-// The card plays Home Assistant's own HLS of the camera (the integration relays
-// the EZVIZ cloud stream for cameras that expose no local RTSP). It is styled
-// after Mushroom cards — rounded card, an icon tile, a media area with a soft
-// play button — but needs neither Mushroom nor any other frontend dependency.
+// The card plays Home Assistant's own stream of the camera — the same MJPEG
+// proxy stream its camera view uses, so the picture appears in a couple of
+// seconds (the integration relays the EZVIZ cloud stream for cameras that
+// expose no local RTSP). It is styled after Mushroom cards — rounded card, an
+// icon tile, a media area with a soft play button — but needs neither Mushroom
+// nor any other frontend dependency.
 //
 // To keep a battery camera asleep, the card stops the stream whenever it is not
 // on screen (another dashboard view, another browser tab, scrolled away) or
@@ -159,7 +161,7 @@ const style = /* css */ `
     overflow: hidden;
     background: var(--secondary-background-color, #111);
   }
-  .media video {
+  .media video, .media .live {
     position: absolute; inset: 0; width: 100%; height: 100%;
     object-fit: contain; background: #000; display: block;
   }
@@ -342,9 +344,11 @@ class EzvizVideoCard extends HTMLElement {
   }
 
   _onHidden() {
-    // Keep the session alive off screen: just pause the picture so the browser
-    // stops decoding. Its max_seconds countdown keeps running.
-    if (this._video && (this._state === "playing" || this._state === "loading")) {
+    // Keep the session alive off screen: a video is only paused so the browser
+    // stops decoding (its max_seconds countdown keeps running), while the MJPEG
+    // picture simply carries on. Both resume/continue when the card is back.
+    if (this._state !== "playing" && this._state !== "loading") return;
+    if (this._video instanceof HTMLVideoElement) {
       try {
         this._video.pause();
       } catch {
@@ -597,6 +601,52 @@ class EzvizVideoCard extends HTMLElement {
       return;
     }
 
+    // Play exactly what Home Assistant's own camera view plays: the MJPEG proxy
+    // stream. It shows the first frame as soon as the camera produces it, while
+    // HLS first has to build segments — on a battery camera over the cloud that
+    // is the difference between about two seconds and about twenty. A camera
+    // with no token (rare) falls back to HLS.
+    const mjpeg = this._mjpegUrl(entity);
+    if (mjpeg) {
+      this._startMjpeg(gen, lang, entity, mjpeg);
+    } else {
+      await this._startHls(gen, lang, entity);
+    }
+  }
+
+  _mjpegUrl(entity) {
+    const state = this._hass?.states?.[entity];
+    let token = state?.attributes?.access_token;
+    if (!token) {
+      const picture = state?.attributes?.entity_picture || "";
+      const match = picture.match(/[?&]token=([^&]+)/);
+      if (match) token = match[1];
+    }
+    if (!token) return "";
+    return `${window.location.origin}/api/camera_proxy_stream/${entity}?token=${encodeURIComponent(token)}`;
+  }
+
+  _startMjpeg(gen, lang, entity, url) {
+    const img = document.createElement("img");
+    img.className = "live";
+    img.alt = "";
+    // 'load' fires when the first frame of the multipart stream is in; the open
+    // connection then keeps replacing the picture as the camera sends more.
+    img.addEventListener("load", () => this._onStarted(gen, lang));
+    img.addEventListener("error", () => {
+      if (gen === this._gen) this._fail(t(lang, "could_not_start", { msg: "MJPEG" }));
+    });
+    this._video = img;
+    this._state = "playing";
+    this._render();
+    img.src = url;
+    this._startupTimer = setTimeout(() => {
+      if (gen !== this._gen || this._started) return;
+      this._fail(t(lang, "no_start"));
+    }, STARTUP_SECONDS * 1000);
+  }
+
+  async _startHls(gen, lang, entity) {
     let stream;
     try {
       stream = await this._hass.callWS({
@@ -715,9 +765,9 @@ class EzvizVideoCard extends HTMLElement {
     this._hls = null;
     if (this._video) {
       try {
-        this._video.pause();
+        if (typeof this._video.pause === "function") this._video.pause();
         this._video.removeAttribute("src");
-        this._video.load?.();
+        if (typeof this._video.load === "function") this._video.load();
       } catch {
         /* ignore */
       }

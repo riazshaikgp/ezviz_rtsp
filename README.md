@@ -120,6 +120,11 @@ the card also starts a clip by itself when it first appears; with the default
 A **battery camera's charge** is shown in the top-right corner, opposite the
 camera name, when the integration exposes it.
 
+The card plays the **same MJPEG stream Home Assistant's own camera view uses**,
+so the picture appears in a couple of seconds instead of waiting for HLS to build
+segments. (HLS is used only as a fallback for a camera that exposes no stream
+token.)
+
 The card waits up to 45 seconds for the camera to wake and send its first frame
 (a battery camera over the cloud relay is not instant); `max_seconds` only starts
 counting once the picture is on screen.
@@ -128,7 +133,7 @@ counting once the picture is on screen.
 it:
 
 1. The **card** stops the stream when `max_seconds` runs out, and releases the
-   HLS reader.
+   reader.
 2. The **integration** closes the cloud session **20 seconds** after the last
    reader leaves (`LINGER` in `live.py`).
 3. Even if a client misbehaves entirely, a battery camera is cut off after
