@@ -120,10 +120,9 @@ the card also starts a clip by itself when it first appears; with the default
 A **battery camera's charge** is shown in the top-right corner, opposite the
 camera name, when the integration exposes it.
 
-The card plays the **same MJPEG stream Home Assistant's own camera view uses**,
-so the picture appears in a couple of seconds instead of waiting for HLS to build
-segments. (HLS is used only as a fallback for a camera that exposes no stream
-token.)
+The card shows the camera's **last picture straight away** while the stream
+wakes, so it never looks blank during the few seconds a battery camera needs to
+come online.
 
 The card waits up to 45 seconds for the camera to wake and send its first frame
 (a battery camera over the cloud relay is not instant); `max_seconds` only starts

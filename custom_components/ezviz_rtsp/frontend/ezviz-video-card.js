@@ -10,12 +10,10 @@
 //   auto_play: false       # optional; play while the card is on screen
 //   max_seconds: 60        # optional; stop to save battery, 0 = never
 //
-// The card plays Home Assistant's own stream of the camera — the same MJPEG
-// proxy stream its camera view uses, so the picture appears in a couple of
-// seconds (the integration relays the EZVIZ cloud stream for cameras that
-// expose no local RTSP). It is styled after Mushroom cards — rounded card, an
-// icon tile, a media area with a soft play button — but needs neither Mushroom
-// nor any other frontend dependency.
+// The card plays Home Assistant's own HLS of the camera (the integration relays
+// the EZVIZ cloud stream for cameras that expose no local RTSP). It is styled
+// after Mushroom cards — rounded card, an icon tile, a media area with a soft
+// play button — but needs neither Mushroom nor any other frontend dependency.
 //
 // To keep a battery camera asleep, the card stops the stream whenever it is not
 // on screen (another dashboard view, another browser tab, scrolled away) or
@@ -161,7 +159,7 @@ const style = /* css */ `
     overflow: hidden;
     background: var(--secondary-background-color, #111);
   }
-  .media video, .media .live {
+  .media video {
     position: absolute; inset: 0; width: 100%; height: 100%;
     object-fit: contain; background: #000; display: block;
   }
@@ -204,9 +202,11 @@ const style = /* css */ `
   .chip:hover { background: color-mix(in srgb, #000 70%, transparent); }
 
   .spinner {
-    width: 34px; height: 34px; border-radius: 50%;
-    border: 3px solid color-mix(in srgb, #fff 25%, transparent);
+    position: absolute; right: 10px; bottom: 10px; z-index: 2;
+    width: 26px; height: 26px; border-radius: 50%;
+    border: 3px solid color-mix(in srgb, #fff 30%, transparent);
     border-top-color: #fff;
+    background: color-mix(in srgb, #000 45%, transparent);
     animation: spin 900ms linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -510,12 +510,11 @@ class EzvizVideoCard extends HTMLElement {
       media.appendChild(this._video); // re-attach the running element
       media.appendChild(this._stopChip());
     } else if (this._state === "loading") {
-      const message = document.createElement("div");
-      message.className = "message";
+      // Show the last picture right away, with a small spinner in the corner -
+      // the camera can take a few seconds to wake, and a blank card looks broken.
       const spinner = document.createElement("div");
       spinner.className = "spinner";
-      message.appendChild(spinner);
-      media.appendChild(message);
+      media.appendChild(spinner);
     } else {
       const cover = document.createElement("button");
       cover.className = "cover";
@@ -600,50 +599,7 @@ class EzvizVideoCard extends HTMLElement {
       this._fail(t(lang, "no_entity"));
       return;
     }
-
-    // Play exactly what Home Assistant's own camera view plays: the MJPEG proxy
-    // stream. It shows the first frame as soon as the camera produces it, while
-    // HLS first has to build segments — on a battery camera over the cloud that
-    // is the difference between about two seconds and about twenty. A camera
-    // with no token (rare) falls back to HLS.
-    const mjpeg = this._mjpegUrl(entity);
-    if (mjpeg) {
-      this._startMjpeg(gen, lang, entity, mjpeg);
-    } else {
-      await this._startHls(gen, lang, entity);
-    }
-  }
-
-  _mjpegUrl(entity) {
-    const state = this._hass?.states?.[entity];
-    let token = state?.attributes?.access_token;
-    if (!token) {
-      const picture = state?.attributes?.entity_picture || "";
-      const match = picture.match(/[?&]token=([^&]+)/);
-      if (match) token = match[1];
-    }
-    if (!token) return "";
-    return `${window.location.origin}/api/camera_proxy_stream/${entity}?token=${encodeURIComponent(token)}`;
-  }
-
-  _startMjpeg(gen, lang, entity, url) {
-    const img = document.createElement("img");
-    img.className = "live";
-    img.alt = "";
-    // 'load' fires when the first frame of the multipart stream is in; the open
-    // connection then keeps replacing the picture as the camera sends more.
-    img.addEventListener("load", () => this._onStarted(gen, lang));
-    img.addEventListener("error", () => {
-      if (gen === this._gen) this._fail(t(lang, "could_not_start", { msg: "MJPEG" }));
-    });
-    this._video = img;
-    this._state = "playing";
-    this._render();
-    img.src = url;
-    this._startupTimer = setTimeout(() => {
-      if (gen !== this._gen || this._started) return;
-      this._fail(t(lang, "no_start"));
-    }, STARTUP_SECONDS * 1000);
+    await this._startHls(gen, lang, entity);
   }
 
   async _startHls(gen, lang, entity) {
@@ -694,7 +650,17 @@ class EzvizVideoCard extends HTMLElement {
       const Hls = await loadHls();
       if (gen !== this._gen) return;
       if (Hls.isSupported()) {
-        const hls = new Hls({ liveSyncDurationCount: 3 });
+        // The same settings Home Assistant's own player uses, which start the
+        // picture as soon as the first fragment is buffered.
+        const hls = new Hls({
+          backBufferLength: 60,
+          fragLoadingTimeOut: 30000,
+          manifestLoadingTimeOut: 30000,
+          levelLoadingTimeOut: 30000,
+          maxLiveSyncPlaybackRate: 2,
+          liveSyncDurationCount: 2,
+          lowLatencyMode: true,
+        });
         let started = false;
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data.fatal && !started && gen === this._gen) {
