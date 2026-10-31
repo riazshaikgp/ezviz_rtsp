@@ -3,7 +3,6 @@
 *Live picture from EZVIZ cameras that don't want to give you one — battery
 doorbells, peepholes and other sleepy devices.*
 
-[![Open HACS repository in Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tarasifua&repository=ezviz_rtsp&category=integration)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-2f6f4e.svg)](LICENSE)
 [![Home Assistant 2026.10+](https://img.shields.io/badge/Home%20Assistant-2026.10%2B-3d7ff2.svg)](https://www.home-assistant.io)
 
@@ -31,17 +30,14 @@ it sits **next to** the built-in one instead of replacing it.
 
 ## Put it in HACS
 
-Press the button above, or do it by hand:
+[![Open HACS repository in Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tarasifua&repository=ezviz_rtsp&category=integration)
 
-<details>
-<summary>Manual HACS steps</summary>
+Or add it by hand:
 
 1. Open **HACS**.
 2. Top-right menu (**⋮**) → **Custom repositories**.
 3. Repository: `https://github.com/tarasifua/ezviz_rtsp` — Category: **Integration**.
 4. Find **Ezviz Cloud with Video** in the list, install it, restart Home Assistant.
-
-</details>
 
 <details>
 <summary>No HACS? Copy the folder</summary>
@@ -160,16 +156,15 @@ sleeping camera in the background.
 
 ## Devices
 
-Anything the EZVIZ app can show should work. Battery cameras and peepholes are
-the point of the project, but cameras with encryption on are handled too.
+There is no per-model promise. This uses the same cloud path the EZVIZ app
+uses, so **it should work with any camera the app can show** — battery cameras,
+peepholes, and cameras with video encryption on. A camera that plays in the app
+is expected to play here, but only testing will tell.
 
-| Family | Kind | Notes |
-|---|---|---|
-| DP2 | Battery video doorbell | Verified: 2048×1296 H.265 + AAC through the cloud relay |
-| HP2 | Battery peephole | Works with encryption on |
-| CP2 / CP4 | Peepholes | Live view reported working |
+Verified while building this: **DP2** (battery video doorbell), 2048×1296 H.265
++ AAC through the cloud relay.
 
-If you try a new model, an issue with the result is very welcome.
+If you try another model, an issue with the result is welcome.
 
 ---
 
