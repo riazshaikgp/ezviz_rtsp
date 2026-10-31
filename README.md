@@ -3,8 +3,10 @@
 *Live picture from EZVIZ cameras that don't want to give you one — battery
 doorbells, peepholes and other sleepy devices.*
 
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-2f6f4e.svg)](LICENSE)
-[![Home Assistant 2026.10+](https://img.shields.io/badge/Home%20Assistant-2026.10%2B-3d7ff2.svg)](https://www.home-assistant.io)
+![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-2f6f4e)
+![Home Assistant 2026.10+](https://img.shields.io/badge/Home_Assistant-2026.10%2B-3d7ff2)
+
+Licensed under **[Apache-2.0](LICENSE)**. Requires **Home Assistant 2026.10 or newer**.
 
 ---
 
@@ -68,13 +70,18 @@ background, so a restart doesn't make you log in again.
 ## The card that comes with it
 
 The integration serves its own Lovelace card, so there's no resource to add:
-just pick **EZVIZ Cloud live** in the card picker or paste the YAML. The card
-finds a camera by its serial and plays Home Assistant's own stream.
+just pick **EZVIZ Video** in the card picker or paste the YAML. It is styled
+after **Mushroom cards** — a rounded card, an icon tile, a status line and a
+soft play button over the picture — but it needs neither Mushroom nor any other
+frontend add-on. The card finds a camera by its serial and plays Home
+Assistant's own stream.
 
 ```yaml
-type: custom:ezviz-cloud-live-card
+type: custom:ezviz-video-card
 serial: BC1234567
-title: Front door      # optional
+title: Front door      # optional; defaults to the camera's name
+icon: mdi:doorbell     # optional
+auto_play: false       # optional; start streaming as soon as the card appears
 max_seconds: 60        # optional; stop the stream to protect the battery (0 = never)
 ```
 
@@ -82,8 +89,15 @@ max_seconds: 60        # optional; stop the stream to protect the battery (0 = n
 |---|---|---|
 | `serial` | — | The device serial (on the label or in the EZVIZ app). The visual editor lists your cameras. |
 | `entity` | — | Use a camera entity directly instead of looking one up by serial. |
-| `title` | none | A heading above the picture. |
+| `title` | camera name | The heading in the card. |
+| `icon` | `mdi:video` | The icon in the tile. |
+| `auto_play` | `true` | Start the stream when the card appears. Set `false` to wait for a tap (gentler on a battery camera). |
 | `max_seconds` | `60` | How long the stream may run before it is stopped automatically. `0` keeps it going until you leave. |
+
+The dashboard shows the camera's **last alarm picture** as a poster, with a play
+button over it — tapping starts the live view, and a **Stop** chip ends it. When
+`auto_play` is off, an idle card never wakes the camera. This is the intended way
+to put a battery camera on a dashboard.
 
 There's also a visual editor: the serial becomes a dropdown of your cameras.
 

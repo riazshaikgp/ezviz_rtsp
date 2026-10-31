@@ -119,6 +119,24 @@ async def test_battery_camera_sets_up_and_offers_a_cloud_stream(hass) -> None:
 
     # The Lovelace card is served and registered for the frontend.
     assert hass.data[DATA_CARD] is True
+    from homeassistant.components.frontend import DATA_EXTRA_MODULE_URL
+
+    module_urls = hass.data[DATA_EXTRA_MODULE_URL].urls
+    assert any(
+        "/ezviz_rtsp/ezviz-video-card.js" in url for url in module_urls
+    ), module_urls
+
+
+async def test_card_file_is_served(hass, hass_client) -> None:
+    await _setup(hass)
+    client = await hass_client()
+    resp = await client.get("/ezviz_rtsp/ezviz-video-card.js")
+    assert resp.status == 200
+    assert "text/javascript" in resp.headers["Content-Type"]
+    body = await resp.text()
+    # The file defines and announces the card.
+    assert "custom:ezviz-video-card" in body or "ezviz-video-card" in body
+    assert "window.customCards.push" in body
 
 
 async def test_card_devices_websocket_lists_the_camera(hass, hass_ws_client) -> None:

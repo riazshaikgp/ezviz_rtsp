@@ -24,7 +24,7 @@ DATA_CARD = f"{DOMAIN}_card_registered"
 DATA_WS = f"{DOMAIN}_ws_registered"
 
 # The Lovelace card the integration ships and serves.
-CARD_FILENAME = "ezviz-cloud-live-card.js"
+CARD_FILENAME = "ezviz-video-card.js"
 CARD_URL = f"/{DOMAIN}/{CARD_FILENAME}"
 
 # Services data
