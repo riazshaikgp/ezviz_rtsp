@@ -33,6 +33,9 @@ from homeassistant.const import (
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
     BooleanSelector,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -49,6 +52,7 @@ from .const import (
     CONF_CODE,
     CONF_CODES,
     CONF_FFMPEG_ARGUMENTS,
+    CONF_MAX_SESSION,
     CONF_MFA,
     CONF_RFSESSION_ID,
     CONF_SERIAL,
@@ -62,7 +66,7 @@ from .const import (
     RUSSIA_URL,
 )
 from .coordinator import EzvizConfigEntry
-from .live import uses_cloud_stream
+from .live import MAX_SESSION, uses_cloud_stream
 
 _LOGGER = logging.getLogger(__name__)
 DEFAULT_OPTIONS = {
@@ -478,7 +482,7 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
     ) -> ConfigFlowResult:
         """Show the options menu; each part saves on its own."""
         return self.async_show_menu(
-            step_id="init", menu_options=["general", "codes", "video"]
+            step_id="init", menu_options=["general", "stream", "video", "codes"]
         )
 
     async def async_step_general(
@@ -568,6 +572,44 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
             for serial, value in data.items()
             if uses_cloud_stream(self.hass, serial)
         ]
+
+    async def async_step_stream(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Cap how long one battery-camera live stream may run.
+
+        The stream is stopped after this many seconds even if something is still
+        watching, so a battery camera can never be left streaming. ``0`` removes
+        the cap.
+        """
+        options = self.config_entry.options
+        if user_input is not None:
+            return self.async_create_entry(
+                title="",
+                data={
+                    **options,
+                    CONF_MAX_SESSION: int(user_input[CONF_MAX_SESSION]),
+                },
+            )
+        return self.async_show_form(
+            step_id="stream",
+            data_schema=probatio.Schema(
+                {
+                    probatio.Optional(
+                        CONF_MAX_SESSION,
+                        default=options.get(CONF_MAX_SESSION, MAX_SESSION),
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0,
+                            max=3600,
+                            step=30,
+                            mode=NumberSelectorMode.BOX,
+                            unit_of_measurement="s",
+                        )
+                    )
+                }
+            ),
+        )
 
     async def async_step_video(
         self, user_input: dict[str, Any] | None = None

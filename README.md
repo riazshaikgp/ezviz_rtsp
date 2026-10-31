@@ -116,8 +116,8 @@ before it stays awake, and any one of them ends it:
 2. The **integration** closes the cloud session **20 seconds** after the last
    reader leaves (`LINGER` in `live.py`).
 3. Even if a client misbehaves entirely, a battery camera is cut off after
-   **5 minutes** of one continuous stream (`MAX_SESSION` in `live.py`); powered
-   cameras are not capped.
+   **5 minutes** of one continuous stream (changeable under **Configure →
+   Maximum stream duration**); powered cameras are not capped.
 
 Every open and close is written to the Home Assistant log
 (`Live view of <serial> is streaming` / `… stopped` / `… hit its N s battery
@@ -139,6 +139,10 @@ Everything below lives under **Configure** on the integration:
 - **Verification codes** — only matters for cameras with *video encryption*
   enabled. Type the six-letter code from the camera's label; it decrypts the
   stream inside Home Assistant and is never sent to a browser.
+- **Maximum stream duration** — how long one battery-camera live stream may run
+  before the integration stops it, in seconds (default **300**; `0` removes the
+  cap). This is the safety net that keeps a battery camera from being left
+  streaming, whatever a client does.
 - **General** — request timeout and the ffmpeg arguments for cameras you added
   over local RTSP.
 - **Stream address for other apps** — see below.

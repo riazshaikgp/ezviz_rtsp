@@ -18,6 +18,7 @@ CONF_CODES = "codes"  # verification code per serial, for encrypted video
 CONF_SERIAL = "serial"
 CONF_CODE = "code"
 CONF_TRANSCODE = "transcode"  # re-encode the live stream to H.264 for the browser
+CONF_MAX_SESSION = "max_session"  # cap a battery camera's stream, in seconds
 CONF_STREAM_TOKEN = "stream_token"  # guards the live address other apps read
 DATA_LIVE_VIEW = f"{DOMAIN}_live_view_registered"
 DATA_CARD = f"{DOMAIN}_card_registered"

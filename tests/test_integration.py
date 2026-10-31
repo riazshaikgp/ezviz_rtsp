@@ -71,7 +71,11 @@ async def _setup(hass) -> MockConfigEntry:
             CONF_RFSESSION_ID: "refresh",
             CONF_URL: "apiieu.ezvizlife.com",
         },
-        options={"ffmpeg_arguments": "/Streaming/Channels/102", "timeout": 25},
+        options={
+            "ffmpeg_arguments": "/Streaming/Channels/102",
+            "timeout": 25,
+            "max_session": 30,
+        },
         unique_id="owner@example.com",
     )
     entry.add_to_hass(hass)
@@ -103,6 +107,8 @@ async def test_battery_camera_sets_up_and_offers_a_cloud_stream(hass) -> None:
     assert set(entry.runtime_data.live_streams) == {"BK1"}
     # A battery camera's stream carries a hard session cap (never left streaming).
     assert entry.runtime_data.live_streams["BK1"].battery is True
+    # The cap comes from the options ("Maximum stream duration").
+    assert entry.runtime_data.live_streams["BK1"]._max_session == 30
     assert hass.data[DATA_LIVE_VIEW] is True
 
     # A battery camera must not trigger the RTSP discovery flow.

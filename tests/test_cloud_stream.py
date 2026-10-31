@@ -245,6 +245,20 @@ async def test_powered_stream_has_no_hard_limit(upstream) -> None:
     await stream.async_close()
 
 
+async def test_battery_stream_without_a_limit_has_no_deadline(upstream) -> None:
+    stream = LiveStream(
+        _hass(), _coordinator(), "BK1", 1, lambda: None, battery=True, max_session=0
+    )
+    frames = stream.frames()
+    pending = asyncio.ensure_future(anext(frames))
+    await asyncio.sleep(0)
+    upstream.queue.put_nowait(IMKH + KEY + PACK)
+    assert await pending == KEY
+    assert stream._deadline is None
+    await frames.aclose()
+    await stream.async_close()
+
+
 # --- LiveStreamView -----------------------------------------------------------
 
 
@@ -516,6 +530,15 @@ async def test_options_menu_and_video_step() -> None:
     flow, _ = _options_flow({})
     menu = await flow.async_step_init()
     assert menu["type"] == "menu"
-    assert menu["menu_options"] == ["general", "codes", "video"]
+    assert menu["menu_options"] == ["general", "stream", "video", "codes"]
     result = await flow.async_step_video({"transcode": True})
+    assert result["data"]["transcode"] is True
+
+
+async def test_options_stream_step_saves_the_limit() -> None:
+    flow, entry = _options_flow({})
+    entry.options = {"transcode": True}
+    result = await flow.async_step_stream({"max_session": 120})
+    assert result["data"]["max_session"] == 120
+    # The other options are kept.
     assert result["data"]["transcode"] is True

@@ -35,6 +35,7 @@ from .cloud_stream import (
 )
 from .const import (
     CONF_CODES,
+    CONF_MAX_SESSION,
     CONF_STREAM_TOKEN,
     CONF_TRANSCODE,
     DATA_LIVE_VIEW,
@@ -85,6 +86,7 @@ class LiveStream:
         transcode: bool = False,
         encrypted: bool = False,
         battery: bool = False,
+        max_session: float = MAX_SESSION,
     ) -> None:
         self._hass = hass
         self._coordinator = coordinator
@@ -93,8 +95,10 @@ class LiveStream:
         self._code = code
         # A verification code only means something when the camera encrypts video.
         self.encrypted = encrypted
-        # A battery camera gets a hard cap on how long it may stream (MAX_SESSION).
+        # A battery camera gets a hard cap on how long it may stream (max_session
+        # seconds; 0 disables the cap).
         self.battery = battery
+        self._max_session = max_session
         self._readers: set[asyncio.Queue[_Item]] = set()
         self._task: asyncio.Task[None] | None = None
         self._linger: asyncio.TimerHandle | None = None
@@ -135,8 +139,8 @@ class LiveStream:
             self._linger.cancel()
             self._linger = None
         if self._task is None:
-            if self.battery and self._deadline is None:
-                self._deadline = loop.call_later(MAX_SESSION, self._session_timeout)
+            if self.battery and self._max_session > 0 and self._deadline is None:
+                self._deadline = loop.call_later(self._max_session, self._session_timeout)
             self._task = self._hass.async_create_background_task(
                 self._run(), f"{DOMAIN} live {self.serial}"
             )
@@ -174,7 +178,7 @@ class LiveStream:
             _LOGGER.info(
                 "Live view of %s hit its %d s battery limit; stopping it now",
                 self.serial,
-                MAX_SESSION,
+                int(self._max_session),
             )
             self._task.cancel()
 
@@ -434,12 +438,14 @@ def async_setup_live_streams(
     # Transcode by default: the cloud stream is HEVC, which most browsers can't
     # play, and the whole point of this fork is to make battery cameras visible.
     transcode = bool(entry.options.get(CONF_TRANSCODE, True))
+    # How long one battery-camera stream may run before it is cut off (0 = never).
+    max_session = float(entry.options.get(CONF_MAX_SESSION, MAX_SESSION))
     for serial, value in coordinator.data.items():
         def _code(serial: str = serial) -> str | None:
             return entry.options.get(CONF_CODES, {}).get(serial)
 
         # A battery camera gets a hard session cap, so it can never be left
-        # streaming and draining (see LiveStream.battery / MAX_SESSION).
+        # streaming and draining (see LiveStream.battery / max_session).
         battery = (
             value.get("battery_level") is not None
             or value.get("battery_camera_work_mode") is not None
@@ -454,6 +460,7 @@ def async_setup_live_streams(
             transcode=transcode,
             encrypted=bool(value.get("encrypted")),
             battery=battery,
+            max_session=max_session,
         )
 
 

@@ -195,6 +195,7 @@
         "menu_options": {
           "codes": "Verification codes",
           "general": "General",
+          "stream": "Maximum stream duration",
           "video": "Video transcoding"
         }
       },
@@ -226,6 +227,16 @@
         },
         "description": "Cloud cameras (battery cameras and peepholes) send HEVC (H.265), which many browsers can't play. Re-encoding to H.264 makes the live view play everywhere.",
         "title": "Video transcoding"
+      },
+      "stream": {
+        "data": {
+          "max_session": "Maximum stream duration"
+        },
+        "data_description": {
+          "max_session": "How long one live stream of a battery camera may run before it is stopped, in seconds. 0 removes the limit."
+        },
+        "description": "A battery camera is stopped after this long even if something is still watching, so it can never be left streaming and draining. This is a safety net independent of the card's own stop button.",
+        "title": "Maximum stream duration"
       }
     }
   },
