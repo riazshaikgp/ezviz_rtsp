@@ -14,6 +14,7 @@ from custom_components.ezviz_rtsp.const import (
     ATTR_TYPE_CLOUD,
     CONF_RFSESSION_ID,
     CONF_SESSION_ID,
+    DATA_CARD,
     DATA_LIVE_VIEW,
     DOMAIN,
 )
@@ -115,3 +116,19 @@ async def test_battery_camera_sets_up_and_offers_a_cloud_stream(hass) -> None:
     assert f"/api/{DOMAIN}/live/BK1?token=" in source
     # The stream source carries the same token the entry persisted.
     assert entry.options["stream_token"] in source
+
+    # The Lovelace card is served and registered for the frontend.
+    assert hass.data[DATA_CARD] is True
+
+
+async def test_card_devices_websocket_lists_the_camera(hass, hass_ws_client) -> None:
+    await _setup(hass)
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 7, "type": f"{DOMAIN}/devices"})
+    msg = await client.receive_json()
+    assert msg["success"]
+    (device,) = msg["result"]
+    assert device["serial"] == "BK1"
+    assert device["name"] == "Door"
+    assert device["battery"] is True
+    assert device["entity_id"]

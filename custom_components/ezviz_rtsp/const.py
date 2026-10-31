@@ -20,6 +20,12 @@ CONF_CODE = "code"
 CONF_TRANSCODE = "transcode"  # re-encode the live stream to H.264 for the browser
 CONF_STREAM_TOKEN = "stream_token"  # guards the live address other apps read
 DATA_LIVE_VIEW = f"{DOMAIN}_live_view_registered"
+DATA_CARD = f"{DOMAIN}_card_registered"
+DATA_WS = f"{DOMAIN}_ws_registered"
+
+# The Lovelace card the integration ships and serves.
+CARD_FILENAME = "ezviz-cloud-live-card.js"
+CARD_URL = f"/{DOMAIN}/{CARD_FILENAME}"
 
 # Services data
 DIR_UP = "up"

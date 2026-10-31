@@ -1,6 +1,8 @@
 """Support for EZVIZ camera."""
 
+import hashlib
 import logging
+from pathlib import Path
 
 from pyezvizapi.client import EzvizClient
 from pyezvizapi.exceptions import (
@@ -11,6 +13,8 @@ from pyezvizapi.exceptions import (
     PyEzvizError,
 )
 
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.http.server import StaticPathConfig
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.const import CONF_TIMEOUT, CONF_TYPE, CONF_URL, Platform
 from homeassistant.core import HomeAssistant
@@ -20,9 +24,12 @@ from homeassistant.helpers import entity_registry as er
 from .const import (
     ATTR_TYPE_CAMERA,
     ATTR_TYPE_CLOUD,
+    CARD_FILENAME,
+    CARD_URL,
     CONF_FFMPEG_ARGUMENTS,
     CONF_RFSESSION_ID,
     CONF_SESSION_ID,
+    DATA_CARD,
     DEFAULT_FFMPEG_ARGUMENTS,
     DEFAULT_TIMEOUT,
     DOMAIN,
@@ -49,6 +56,26 @@ PLATFORMS_BY_TYPE: dict[str, list] = {
         Platform.UPDATE,
     ],
 }
+
+
+async def _async_register_card(hass: HomeAssistant) -> None:
+    """Serve the Lovelace card and register its websocket command, once."""
+    if hass.data.get(DATA_CARD):
+        return
+    hass.data[DATA_CARD] = True
+
+    card = Path(__file__).parent / "frontend" / CARD_FILENAME
+    content = await hass.async_add_executor_job(card.read_bytes)
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(CARD_URL, str(card), True)]
+    )
+    # The file is served with a long cache, so the URL carries a hash of its
+    # content: any change to the card reaches browsers on the next page load.
+    add_extra_js_url(hass, f"{CARD_URL}?v={hashlib.sha256(content).hexdigest()[:12]}")
+
+    from .websocket import async_register_commands
+
+    async_register_commands(hass)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EzvizConfigEntry) -> bool:
@@ -98,6 +125,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: EzvizConfigEntry) -> boo
         entry.runtime_data = coordinator
         # One cloud live stream per camera, for cameras that expose no local RTSP.
         async_setup_live_streams(hass, entry, coordinator)
+        # Ship the card that plays those streams.
+        await _async_register_card(hass)
 
     # Check EZVIZ cloud account entity is present, reload
     # cloud account entities for camera entity change

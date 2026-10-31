@@ -1,151 +1,234 @@
 # Ezviz Cloud with Video
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.10%2B-41BDF5.svg)](https://www.home-assistant.io)
+*Live picture from EZVIZ cameras that don't want to give you one — battery
+doorbells, peepholes and other sleepy devices.*
 
-Watch the live video of your EZVIZ cameras on a Home Assistant dashboard,
-**including battery cameras and smart peepholes that have no RTSP** (DP2, HP2,
-CP2, CP4, …) and cameras with **video encryption turned on**.
+[![Open HACS repository in Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tarasifua&repository=ezviz_rtsp&category=integration)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-2f6f4e.svg)](LICENSE)
+[![Home Assistant 2026.10+](https://img.shields.io/badge/Home%20Assistant-2026.10%2B-3d7ff2.svg)](https://www.home-assistant.io)
 
-The built-in EZVIZ integration plays video over the camera's local `rtsp://`
-address. Battery cameras sleep and expose no RTSP server, so they show nothing.
-This integration keeps every feature of the built-in one and, for a camera
-without RTSP, falls back to the **EZVIZ cloud relay (VTM)** — the same transport
-the EZVIZ mobile app uses when you are away from home. The cloud wakes the
-camera; Home Assistant reads the MPEG-PS, decrypts it when video encryption is
-on, and serves it as the camera entity's stream that any card, notification or
-bridge can play.
+---
 
-> This is an **unofficial** project, not affiliated with or endorsed by EZVIZ.
+## The short version
 
-## Domain and coexistence with the built-in integration
+If you have an EZVIZ battery camera or peephole, you already know the routine:
+it works in the EZVIZ app, but Home Assistant shows you nothing. That's not a
+bug you can fix with a setting — those devices sleep and never open an RTSP
+port, so the local-address approach every Home Assistant integration uses has
+nothing to talk to.
 
-The integration uses the domain **`ezviz_rtsp`**, so it does **not** replace or
-conflict with the built-in `ezviz` integration. You can run both side by side.
-It appears in Home Assistant as **"Ezviz Cloud with Video"**.
+This integration talks to them the way the phone app does when you're on
+mobile data. It asks EZVIZ's cloud to wake the camera, pulls the stream down,
+and hands it to Home Assistant as a normal camera. You get a live view, a
+built-in Lovelace card, and the camera stays awake only while you're actually
+looking at it.
 
-## Features
+It is a fork of the **built-in** EZVIZ integration, so everything that one
+does still works here. It lives under its own domain, `ezviz_rtsp`, which means
+it sits **next to** the built-in one instead of replacing it.
 
-- **Cloud live view** for cameras with no local RTSP: the camera entity
-  advertises streaming and serves the EZVIZ cloud stream on demand, only while
-  someone watches (plus a short linger). No local RTSP, no open ports.
-- **Everything the built-in integration has**: alarm panel, sensors, switches,
-  siren, PTZ, image, update, services and the local RTSP camera path.
-- **A still on the dashboard without waking the camera**: a cloud camera's
-  thumbnail is its last alarm picture, so drawing it costs no battery.
-- **Video that just plays**: the cloud stream is HEVC (H.265), so it is
-  re-encoded to H.264 by default (`Configure → Video transcoding`). Turn that
-  off if your browser or phone already plays H.265.
-- **Verification codes per camera** (`Configure → Verification codes`) for
-  cameras with video encryption on. The code decrypts the stream inside Home
-  Assistant and never reaches a browser or a dashboard.
-- **Two-step verification (MFA)**: when your EZVIZ account has 2FA on, EZVIZ
-  sends a code by e-mail or SMS and the setup flow asks for it.
-- **A stable stream address** guarded by a random token, kept in the config
-  entry across restarts, for apps that cannot log in to Home Assistant
-  (go2rtc, Frigate).
+---
 
-## Requirements
+## Put it in HACS
 
-- Home Assistant 2026.10 or newer.
-- An EZVIZ account with the camera added in the EZVIZ app.
-- The camera's **verification code** (six capital letters on the label) only if
-  video encryption is turned on for that camera.
-- Internet on both the camera and Home Assistant: cloud video goes through EZVIZ.
+Press the button above, or do it by hand:
 
-## Installation
+<details>
+<summary>Manual HACS steps</summary>
 
-### HACS (custom repository)
+1. Open **HACS**.
+2. Top-right menu (**⋮**) → **Custom repositories**.
+3. Repository: `https://github.com/tarasifua/ezviz_rtsp` — Category: **Integration**.
+4. Find **Ezviz Cloud with Video** in the list, install it, restart Home Assistant.
 
-1. HACS → ⋮ → **Custom repositories**.
-2. Add `https://github.com/tarasifua/ezviz_rtsp` with category
-   **Integration**.
-3. Install **Ezviz Cloud with Video** and restart Home Assistant.
+</details>
 
-### Manual
+<details>
+<summary>No HACS? Copy the folder</summary>
 
-Copy `custom_components/ezviz_rtsp/` into `config/custom_components/ezviz_rtsp/`
-on the Home Assistant machine (Samba, SSH or the *File editor* add-on on HAOS),
-then restart Home Assistant.
+Drop `custom_components/ezviz_rtsp/` into `config/custom_components/ezviz_rtsp/`
+on your Home Assistant machine (Samba, SSH, or the *File editor* add-on on
+HAOS), then restart.
 
-## Configuration
+</details>
 
-1. **Settings → Devices & services → Add integration → Ezviz Cloud with Video.**
-2. Sign in with the e-mail/phone and password you use in the EZVIZ app and pick
-   your region (`Europe`, `Russia`, or a custom URL).
-3. If EZVIZ sends a verification code, type it in the next step.
-4. Battery cameras show up as a camera entity. The dashboard shows their last
-   alarm picture; press it to open the live view.
+> Upgrading from an earlier copy of this project under the old name? Delete the
+> old `config/custom_components/ezviz/` folder — otherwise it keeps shadowing
+> the built-in integration.
 
-### Verification codes
+---
 
-Only cameras with video encryption turned on need a code. Open **Configure →
-Verification codes**, pick the camera and type the code from its label (leave it
-empty to remove a stored code).
+## First run
 
-### Video transcoding
+Add the integration and sign in with the EZVIZ account from your phone:
 
-On by default. Turn it off in **Configure → Video transcoding** if your browser
-or phone already plays H.265, to save the Home Assistant host's CPU.
+[![Start setting up Ezviz Cloud with Video](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=ezviz_rtsp)
 
-### Other apps (go2rtc, Frigate)
+Pick your region, type the e-mail/phone and password, and — if your account has
+two-step verification on — the code EZVIZ sends you. That's it. Your battery
+cameras appear as normal camera entities and start showing video.
 
-Each camera entity's stream is also served as MPEG-TS at
+The account session is stored in the config entry and renewed quietly in the
+background, so a restart doesn't make you log in again.
 
-```
-<HOME_ASSISTANT_URL>/api/ezviz_rtsp/live/<serial>?token=<stream_token>
+---
+
+## The card that comes with it
+
+The integration serves its own Lovelace card, so there's no resource to add:
+just pick **EZVIZ Cloud live** in the card picker or paste the YAML. The card
+finds a camera by its serial and plays Home Assistant's own stream.
+
+```yaml
+type: custom:ezviz-cloud-live-card
+serial: BC1234567
+title: Front door      # optional
+max_seconds: 60        # optional; stop the stream to protect the battery (0 = never)
 ```
 
-where `stream_token` is kept in the integration options. This address wakes the
-camera while it is read, so keep sessions short.
+| Option | Default | What it does |
+|---|---|---|
+| `serial` | — | The device serial (on the label or in the EZVIZ app). The visual editor lists your cameras. |
+| `entity` | — | Use a camera entity directly instead of looking one up by serial. |
+| `title` | none | A heading above the picture. |
+| `max_seconds` | `60` | How long the stream may run before it is stopped automatically. `0` keeps it going until you leave. |
 
-## How it works
+There's also a visual editor: the serial becomes a dropdown of your cameras.
 
-1. The account session uses [`pyezvizapi`](https://pypi.org/project/pyezvizapi/),
-   the private API of the EZVIZ mobile app.
-2. When a stream starts, `cloud_stream.LiveSource` opens a VTM cloud session and
-   reads the camera's MPEG-PS in a worker thread.
-3. `PackSplitter` cuts the stream into frames and skips the group of pictures
-   the cloud sends first (it does not decode). With a verification code, the NAL
-   bodies are decrypted first.
-4. `LiveStream` shares one open stream per camera between Home Assistant's
-   stream worker and go2rtc, and closes it a few seconds after the last reader
-   leaves.
-5. `LiveStreamView` re-packages it to MPEG-TS for the stream worker, transcoding
-   to H.264 when asked.
+---
 
-## Troubleshooting
+## The settings worth knowing
 
-| Symptom | What to check |
-|---|---|
-| The live view stays black | Transcoding is on by default; if you turned it off, turn it back on, or use a browser/phone that plays H.265. |
-| The camera card has no picture but live view works | The still is the camera's last alarm picture; if the camera never recorded one, the card is empty until you open the live view. |
-| `Live view of <serial> could not start: …` in the log | The camera did not answer the EZVIZ cloud: check it is online in the app and try again. Some battery cameras refuse a new stream for a few minutes after the last one. |
-| A stored code makes the picture garbled | The code is only applied to cameras that encrypt video. Check the code under Configure → Verification codes. |
-| `"EZVIZ rejected the account or password"` | Check the e-mail/phone, the password and the **region**. |
+Everything below lives under **Configure** on the integration:
+
+- **Video transcoding** — *on by default.* EZVIZ sends H.265, which most
+  desktop browsers refuse to decode; this re-encodes the live picture to H.264
+  so it just plays. If your browser or phone already handles H.265, turn it off
+  to save CPU.
+- **Verification codes** — only matters for cameras with *video encryption*
+  enabled. Type the six-letter code from the camera's label; it decrypts the
+  stream inside Home Assistant and is never sent to a browser.
+- **General** — request timeout and the ffmpeg arguments for cameras you added
+  over local RTSP.
+- **Stream address for other apps** — see below.
+
+---
+
+## Feeding other apps (Frigate, go2rtc, …)
+
+Every camera can be read as plain MPEG-TS from a local, token-guarded address:
+
+```
+http://<your-ha>:8123/api/ezviz_rtsp/live/<serial>?token=<stream token>
+```
+
+The token is generated once and kept across restarts, and you can rotate it in
+**Configure → Stream address for other apps**. Reading the address wakes the
+camera, so treat it like a doorbell: switch it on for a moment, then let it
+close.
+
+---
+
+## Under the hood
+
+A quick sketch, for the curious:
+
+```
+ camera ──(sleeps)──┐
+                    │  EZVIZ cloud wakes it on demand
+                    ▼
+        EZVIZ VTM relay ──► LiveSource (worker thread, pyezvizapi)
+                                    │
+                    MPEG-PS frames  │  pack-split, optional H.265/AES decrypt
+                                    ▼
+                              LiveStream (one per camera, shared)
+                                    │
+                ┌───────────────────┴────────────────────┐
+     LiveStreamView (MPEG-TS,           Home Assistant camera entity
+      token-guarded) ──► HA stream       (for any card / bridge /
+      worker ──► HLS (┌─ H.264)           mobile notification)
+                └────────────────────────┘
+                          │
+                  the Lovelace card / any camera card
+```
+
+The whole stream is opened lazily — the first thing that asks for it starts it,
+and it closes a few seconds after the last reader leaves. Nothing polls a
+sleeping camera in the background.
+
+---
+
+## Devices
+
+Anything the EZVIZ app can show should work. Battery cameras and peepholes are
+the point of the project, but cameras with encryption on are handled too.
+
+| Family | Kind | Notes |
+|---|---|---|
+| DP2 | Battery video doorbell | Verified: 2048×1296 H.265 + AAC through the cloud relay |
+| HP2 | Battery peephole | Works with encryption on |
+| CP2 / CP4 | Peepholes | Live view reported working |
+
+If you try a new model, an issue with the result is very welcome.
+
+---
+
+## If something doesn't play
+
+<details>
+<summary>The card / camera stays black</summary>
+
+Transcoding is on by default — if you turned it off, switch it back on, or use
+a browser/phone that decodes H.265. Check the log for a line like
+`Live view of <serial> could not start: …`; that means the camera didn't answer
+the cloud (most often it's asleep or was just streaming).
+
+</details>
+
+<details>
+<summary>The dashboard shows a still, not video</summary>
+
+A cloud camera's thumbnail is its **last alarm picture**, on purpose — drawing a
+camera on a dashboard must not drain its battery. Tap it to open the live view.
+
+</details>
+
+<details>
+<summary>“EZVIZ rejected the account or password”</summary>
+
+Double-check the e-mail/phone, the password, and the **region** your account
+belongs to.
+
+</details>
+
+<details>
+<summary>A stored code garbles the picture</summary>
+
+A verification code is only applied to cameras that actually encrypt video.
+Re-check it under **Configure → Verification codes**.
+
+</details>
+
+---
 
 ## Credits
 
-This project stands on two upstream works. Full license notices are in
+This project would not exist without two upstream works; their notices are in
 [`NOTICE`](NOTICE).
 
-- **Home Assistant Core — EZVIZ integration**
-  ([home-assistant/core](https://github.com/home-assistant/core/tree/dev/homeassistant/components/ezviz)),
-  licensed under the Apache License 2.0. The integration is derived from it.
-  Original author / codeowner: **RenierM26 ([@RenierM26](https://github.com/RenierM26))**.
-- **ezviz-cloud-hass**
-  ([bvis/ezviz-cloud-hass](https://github.com/bvis/ezviz-cloud-hass)),
-  licensed under the MIT License. The cloud (VTM) live-view code is adapted
-  from it. Author: **Basilio Vera ([@bvis](https://github.com/bvis))**.
-- The brand icon is the EZVIZ brand image published in
-  [home-assistant/brands](https://github.com/home-assistant/brands) with an
-  added "video" badge.
+- **The EZVIZ integration in Home Assistant Core** — the foundation this is
+  forked from. Written and maintained by
+  **[RenierM26](https://github.com/RenierM26)** and the Home Assistant
+  contributors, under Apache-2.0.
+- **[ezviz-cloud-hass](https://github.com/bvis/ezviz-cloud-hass)** — the
+  cloud (VTM) live-view idea and code that this draws on. By
+  **[Basilio Vera (@bvis)](https://github.com/bvis)**, under MIT.
+- Brand icon: the EZVIZ brand image from
+  [home-assistant/brands](https://github.com/home-assistant/brands), with a
+  small "video" badge.
 
-## License
+Licensed under **[Apache-2.0](LICENSE)**, with the MIT-licensed parts attributed
+in [`NOTICE`](NOTICE).
 
-[Apache License 2.0](LICENSE), with the MIT-licensed parts attributed in
-[`NOTICE`](NOTICE).
-
-EZVIZ is a trademark of its owner. This project is not affiliated with,
-endorsed by or supported by EZVIZ.
+EZVIZ is a trademark of its owner. This is an independent, unofficial project
+with no affiliation to or endorsement from EZVIZ.
