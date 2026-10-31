@@ -1,22 +1,22 @@
 {
   "config": {
     "abort": {
-      "already_configured_account": "[%key:common::config_flow::abort::already_configured_account%]",
+      "already_configured_account": "Account is already configured",
       "ezviz_cloud_account_missing": "EZVIZ cloud account missing. Please reconfigure EZVIZ cloud account",
-      "unknown": "[%key:common::config_flow::error::unknown%]"
+      "unknown": "Unexpected error"
     },
     "error": {
-      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
-      "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
-      "invalid_host": "[%key:common::config_flow::error::invalid_host%]",
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid authentication",
+      "invalid_host": "Invalid hostname or IP address",
       "invalid_mfa": "EZVIZ rejected the verification code. Check the newest code and try again."
     },
     "flow_title": "{serial}",
     "step": {
       "confirm": {
         "data": {
-          "password": "[%key:common::config_flow::data::password%]",
-          "username": "[%key:common::config_flow::data::username%]"
+          "password": "Password",
+          "username": "Username"
         },
         "description": "Enter RTSP credentials for EZVIZ camera {serial} with IP {ip_address}",
         "title": "Discovered EZVIZ Camera"
@@ -30,25 +30,25 @@
       },
       "reauth_confirm": {
         "data": {
-          "password": "[%key:common::config_flow::data::password%]",
-          "username": "[%key:common::config_flow::data::username%]"
+          "password": "Password",
+          "username": "E-mail or phone"
         },
         "description": "Enter credentials to reauthenticate to EZVIZ cloud account",
-        "title": "[%key:common::config_flow::title::reauth%]"
+        "title": "Authentication expired"
       },
       "user": {
         "data": {
-          "password": "[%key:common::config_flow::data::password%]",
-          "url": "[%key:common::config_flow::data::url%]",
-          "username": "[%key:common::config_flow::data::username%]"
+          "password": "Password",
+          "url": "URL",
+          "username": "E-mail or phone"
         },
         "title": "Connect to EZVIZ Cloud"
       },
       "user_custom_url": {
         "data": {
-          "password": "[%key:common::config_flow::data::password%]",
-          "url": "[%key:common::config_flow::data::url%]",
-          "username": "[%key:common::config_flow::data::username%]"
+          "password": "Password",
+          "url": "URL",
+          "username": "E-mail or phone"
         },
         "description": "Manually specify your region URL",
         "title": "Connect to custom EZVIZ URL"
@@ -85,7 +85,7 @@
     },
     "light": {
       "light": {
-        "name": "[%key:component::light::title%]"
+        "name": "Light"
       }
     },
     "number": {
@@ -144,7 +144,7 @@
     },
     "siren": {
       "siren": {
-        "name": "[%key:component::siren::title%]"
+        "name": "Siren"
       }
     },
     "switch": {
