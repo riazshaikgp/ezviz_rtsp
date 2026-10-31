@@ -101,32 +101,34 @@ max_seconds: 60        # optional; stop the stream to protect the battery (0 = n
 | `entity` | — | Use a camera entity directly instead of looking one up by serial. |
 | `title` | camera name | The heading in the card. |
 | `icon` | `mdi:video` | The icon in the tile. |
-| `auto_play` | `false` | Start the stream as soon as the card is on screen. Off (the default) shows the camera's last picture and waits for a tap, so opening a dashboard never wakes a battery camera. On: it also resumes when you come back to the card. |
-| `max_seconds` | `60` | How long the picture runs before it is stopped automatically, counted **from the first frame** (a battery camera can take a while to wake). `0` keeps it going until the card leaves the screen. |
+| `auto_play` | `false` | Start a clip as soon as the card is on screen. Off (the default) shows the camera's last picture and waits for a tap, so opening a dashboard never wakes a battery camera. A clip you started keeps running (and resumes) when you change views until its `max_seconds` are up. |
+| `max_seconds` | `60` | How long a clip runs before it is stopped automatically, counted **from the first frame** (a battery camera can take a while to wake). `0` never stops it automatically. |
 
 By default the card does nothing until you tap: it shows the camera's **last
 alarm picture** with a play button over it. Tapping starts the live view, which
-runs for `max_seconds`; a **Stop** chip ends it early.
+runs for `max_seconds`; a **Stop** chip ends it early. When `max_seconds` runs
+out the card quietly returns to the last picture — tap the card again to watch
+another clip; nothing has to be reloaded.
 
-**Leaving the card's screen always stops the stream** — another dashboard view,
-a hidden browser tab, or scrolling it away. When you come back:
+**A running clip keeps running.** If you switch to another dashboard view (or
+another browser tab) while the picture is playing, the card only pauses the
+picture off screen — the stream and its countdown carry on, and it resumes when
+you come back, as long as `max_seconds` has not passed. With `auto_play: true`
+the card also starts a clip by itself when it first appears; with the default
+`false` it waits for a tap. An idle card never wakes the camera.
 
-- `auto_play: false` (default): the last picture and the play button are shown
-  again; you press play to watch. An idle card never wakes the camera.
-- `auto_play: true`: the stream starts again by itself.
-
-So a battery camera is awake only while its picture is actually on screen — the
-intended way to put one on a dashboard.
+A **battery camera's charge** is shown in the top-right corner, opposite the
+camera name, when the integration exposes it.
 
 The card waits up to 45 seconds for the camera to wake and send its first frame
 (a battery camera over the cloud relay is not instant); `max_seconds` only starts
 counting once the picture is on screen.
 
-**A battery camera can never be left streaming.** Three things have to agree
-before it stays awake, and any one of them ends it:
+**A battery camera can never be left streaming forever.** Any one of these ends
+it:
 
-1. The **card** stops the stream as soon as it leaves the screen or `max_seconds`
-   runs out, and releases the HLS reader.
+1. The **card** stops the stream when `max_seconds` runs out, and releases the
+   HLS reader.
 2. The **integration** closes the cloud session **20 seconds** after the last
    reader leaves (`LINGER` in `live.py`).
 3. Even if a client misbehaves entirely, a battery camera is cut off after

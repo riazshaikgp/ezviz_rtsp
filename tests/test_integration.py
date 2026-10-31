@@ -159,4 +159,6 @@ async def test_card_devices_websocket_lists_the_camera(hass, hass_ws_client) -> 
     assert device["serial"] == "BK1"
     assert device["name"] == "Door"
     assert device["battery"] is True
+    assert device["battery_level"] == 52
+    assert "battery_entity_id" in device
     assert device["entity_id"]

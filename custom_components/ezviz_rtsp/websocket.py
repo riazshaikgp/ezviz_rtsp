@@ -36,6 +36,16 @@ def _loaded_entries(hass: HomeAssistant) -> list[ConfigEntry]:
     ]
 
 
+def _battery_entity_id(registry: er.EntityRegistry, serial: str) -> str | None:
+    """The battery sensor of a camera, so the card can show its charge."""
+    suffix = ".battery_level"
+    for entity in registry.entities.values():
+        unique_id = entity.unique_id or ""
+        if entity.platform == DOMAIN and entity.domain == "sensor" and unique_id.startswith(f"{serial}_") and unique_id.endswith(suffix):
+            return entity.entity_id
+    return None
+
+
 @websocket_command({vol.Required("type"): f"{DOMAIN}/devices"})
 @async_response
 async def ws_get_devices(
@@ -56,6 +66,8 @@ async def ws_get_devices(
                     "encrypted": bool(value.get("encrypted")),
                     "has_code": serial in codes,
                     "battery": value.get("battery_level") is not None,
+                    "battery_level": value.get("battery_level"),
+                    "battery_entity_id": _battery_entity_id(registry, serial),
                     "entity_id": registry.async_get_entity_id("camera", DOMAIN, serial),
                 }
             )

@@ -136,6 +136,12 @@ const style = /* css */ `
     display: flex; align-items: center; gap: 6px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+  .battery {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 3px;
+    font-size: 13px; font-weight: 500; line-height: 1;
+    color: var(--secondary-text-color); --mdc-icon-size: 20px;
+  }
+  .battery.low { color: var(--error-color, #db4437); }
   .dot {
     width: 8px; height: 8px; border-radius: 50%;
     background: var(--secondary-text-color); flex: 0 0 auto;
@@ -181,6 +187,7 @@ const style = /* css */ `
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     text-align: center; padding: 0 14px; color: #eee; font-size: 13px;
     background: linear-gradient(0deg, rgba(0,0,0,.25), rgba(0,0,0,.25));
+    pointer-events: none; /* never block the play button underneath */
   }
 
   .chip {
@@ -213,9 +220,6 @@ class EzvizVideoCard extends HTMLElement {
     // Bumped on every stop so a stream that is still opening cannot finish
     // after the card was hidden or reloaded.
     this._gen = 0;
-    // Whether the stream was stopped because the card went out of view, so it
-    // can be resumed when the card is shown again (only if auto_play is on).
-    this._stoppedByVisibility = false;
     // Whether the first frame has reached the screen (max_seconds counts from it).
     this._started = false;
     this._startupTimer = null;
@@ -256,6 +260,7 @@ class EzvizVideoCard extends HTMLElement {
       this._lang = lang;
       if (!this._video && this._state !== "loading") this._render();
     }
+    this._syncBattery();
   }
 
   getCardSize() {
@@ -274,10 +279,12 @@ class EzvizVideoCard extends HTMLElement {
 
   // -- visibility ----------------------------------------------------------
   //
-  // A battery camera must not be kept awake while nobody is looking, and a live
-  // stream must be re-opened when the card returns. Lovelace keeps an inactive
-  // view in the DOM, so IntersectionObserver is not reliable here; the card
-  // polls its own geometry instead, and reacts at once to a hidden browser tab.
+  // A battery camera must not sit awake with nobody looking, but a stream the
+  // user started has to keep running until its max_seconds are up. Lovelace
+  // keeps an inactive view in the DOM, so IntersectionObserver alone is not
+  // reliable; the card polls its own geometry and reacts at once to a hidden
+  // browser tab. Leaving the view only pauses the picture - the session and its
+  // countdown continue - and it resumes when the card is back on screen.
 
   _watchVisibility() {
     if (!this._visTimer) {
@@ -335,39 +342,25 @@ class EzvizVideoCard extends HTMLElement {
   }
 
   _onHidden() {
-    if (this._state !== "playing" && this._state !== "loading") return;
-    this._stoppedByVisibility = true;
-    // A browser-induced pause must not be mistaken for the user pausing; only a
-    // pause while the card is on screen counts as the user's.
-    this._userPaused = false;
-    this._stop(true, "");
+    // Keep the session alive off screen: just pause the picture so the browser
+    // stops decoding. Its max_seconds countdown keeps running.
+    if (this._video && (this._state === "playing" || this._state === "loading")) {
+      try {
+        this._video.pause();
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   _onShown() {
-    this._userPaused = false;
-    const auto = !!this._config?.auto_play;
-    if (this._stoppedByVisibility) {
-      this._stoppedByVisibility = false;
-      // Only start by itself when auto_play is on; otherwise stay idle on the
-      // last picture and wait for a tap.
-      if (auto && this._state === "idle") this._play();
-      return;
-    }
-    // A stream the user started and that is still "playing" but was paused by the
-    // browser while away is stale; restart it, but only when auto_play is on.
-    if (auto && this._state === "playing" && this._started) this._restart();
+    this._ensurePlaying();
   }
 
   _ensurePlaying() {
     if (this._userPaused || this._state !== "playing" || !this._started) return;
     const video = this._video;
     if (video && video.paused) video.play().catch(() => {});
-  }
-
-  _restart() {
-    this._stop();
-    this._state = "idle";
-    this._play();
   }
 
   // -- data ----------------------------------------------------------------
@@ -381,6 +374,7 @@ class EzvizVideoCard extends HTMLElement {
     }
     // Re-fill the header name/icon now that devices are known.
     if (this._state === "idle" && !this._video) this._render();
+    this._syncBattery();
   }
 
   _findDevice() {
@@ -418,6 +412,43 @@ class EzvizVideoCard extends HTMLElement {
     return new URL(pic, window.location.origin).toString();
   }
 
+  _batteryEntity() {
+    return this._findDevice()?.battery_entity_id || null;
+  }
+
+  _batteryLevel() {
+    const id = this._batteryEntity();
+    const state = id ? this._hass?.states?.[id] : null;
+    const level = state ? Number(state.state) : NaN;
+    return Number.isFinite(level) ? level : null;
+  }
+
+  _batteryIcon(level) {
+    if (level === null) return "mdi:battery-unknown";
+    if (level >= 95) return "mdi:battery";
+    if (level <= 5) return "mdi:battery-alert";
+    const step = Math.min(90, Math.max(10, Math.round(level / 10) * 10));
+    return `mdi:battery-${step}`;
+  }
+
+  _syncBattery() {
+    const el = this._header?.battery;
+    if (!el) return;
+    const level = this._batteryLevel();
+    if (level === null) {
+      el.replaceChildren();
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    el.classList.toggle("low", level <= 20);
+    const icon = document.createElement("ha-icon");
+    icon.setAttribute("icon", this._batteryIcon(level));
+    const text = document.createElement("span");
+    text.textContent = `${Math.round(level)}%`;
+    el.replaceChildren(icon, text);
+  }
+
   // -- rendering -----------------------------------------------------------
 
   _render() {
@@ -452,7 +483,11 @@ class EzvizVideoCard extends HTMLElement {
     status.textContent = this._statusText();
     secondary.append(dot, status);
     info.append(primary, secondary);
-    header.append(tile, info);
+
+    // Charge of a battery camera / peephole, opposite the name.
+    const battery = document.createElement("div");
+    battery.className = "battery";
+    header.append(tile, info, battery);
 
     // Media
     const media = document.createElement("div");
@@ -500,7 +535,8 @@ class EzvizVideoCard extends HTMLElement {
     wrap.append(header, media);
     card.appendChild(wrap);
     root.replaceChildren(createStyle(style), card);
-    this._header = { tile, primary, secondary, dot, status };
+    this._header = { tile, primary, secondary, dot, status, battery };
+    this._syncBattery();
   }
 
   _statusText() {
@@ -545,7 +581,6 @@ class EzvizVideoCard extends HTMLElement {
   async _play() {
     if (this._state === "loading" || this._state === "playing") return;
     const gen = ++this._gen;
-    this._stoppedByVisibility = false;
     this._state = "loading";
     this._message = "";
     this._render();
@@ -655,10 +690,9 @@ class EzvizVideoCard extends HTMLElement {
     }
     const max = Number(this._config.max_seconds) || 0;
     if (max > 0) {
-      this._timer = setTimeout(
-        () => this._stop(true, t(lang, "no_video", { s: max })),
-        max * 1000
-      );
+      // Back to the last picture and the play button, quietly - an auto-stop is
+      // expected, not an error, so nothing is written over the card.
+      this._timer = setTimeout(() => this._stop(true), max * 1000);
     }
   }
 
