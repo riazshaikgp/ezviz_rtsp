@@ -230,7 +230,9 @@ class EzvizVideoCard extends HTMLElement {
     if (!config || (!config.serial && !config.entity)) {
       throw new Error("ezviz-video-card: 'serial' (or 'entity') is required");
     }
-    this._config = { max_seconds: 60, auto_play: true, ...config };
+    // Play is off by default: the card shows the camera's last picture and waits
+    // for a tap, so opening the dashboard never wakes a battery camera.
+    this._config = { max_seconds: 60, auto_play: false, ...config };
     this._device = undefined;
     this._stop();
     this._state = "idle";
@@ -338,14 +340,17 @@ class EzvizVideoCard extends HTMLElement {
 
   _onShown() {
     this._userPaused = false;
+    const auto = !!this._config?.auto_play;
     if (this._stoppedByVisibility) {
       this._stoppedByVisibility = false;
-      if (this._config?.auto_play && this._state === "idle") this._play();
+      // Only start by itself when auto_play is on; otherwise stay idle on the
+      // last picture and wait for a tap.
+      if (auto && this._state === "idle") this._play();
       return;
     }
-    // The stream was not stopped (the view was never seen as hidden): a live
-    // HLS that the browser paused while away is stale, so start it over.
-    if (this._state === "playing" && this._started) this._restart();
+    // A stream the user started and that is still "playing" but was paused by the
+    // browser while away is stale; restart it, but only when auto_play is on.
+    if (auto && this._state === "playing" && this._started) this._restart();
   }
 
   _ensurePlaying() {

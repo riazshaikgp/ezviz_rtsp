@@ -91,7 +91,7 @@ type: custom:ezviz-video-card
 serial: BC1234567
 title: Front door      # optional; defaults to the camera's name
 icon: mdi:doorbell     # optional
-auto_play: false       # optional; start streaming as soon as the card appears
+auto_play: false       # optional; off by default — the card waits for a tap
 max_seconds: 60        # optional; stop the stream to protect the battery (0 = never)
 ```
 
@@ -101,18 +101,22 @@ max_seconds: 60        # optional; stop the stream to protect the battery (0 = n
 | `entity` | — | Use a camera entity directly instead of looking one up by serial. |
 | `title` | camera name | The heading in the card. |
 | `icon` | `mdi:video` | The icon in the tile. |
-| `auto_play` | `true` | Start the stream when the card is on screen, and start it again when you come back to it. Set `false` to wait for a tap (gentlest on a battery camera). |
+| `auto_play` | `false` | Start the stream as soon as the card is on screen. Off (the default) shows the camera's last picture and waits for a tap, so opening a dashboard never wakes a battery camera. On: it also resumes when you come back to the card. |
 | `max_seconds` | `60` | How long the picture runs before it is stopped automatically, counted **from the first frame** (a battery camera can take a while to wake). `0` keeps it going until the card leaves the screen. |
 
-The dashboard shows the camera's **last alarm picture** as a poster, with a play
-button over it — tapping starts the live view, and a **Stop** chip ends it.
+By default the card does nothing until you tap: it shows the camera's **last
+alarm picture** with a play button over it. Tapping starts the live view, which
+runs for `max_seconds`; a **Stop** chip ends it early.
 
-**The card stops the stream by itself as soon as nobody is looking**: switch to
-another dashboard view, open another browser tab (or hide the app), scroll the
-card out of sight, or let `max_seconds` run out. With `auto_play` on it starts
-again when the card is back on screen; with it off, an idle card never wakes the
-camera. Either way a battery camera is awake only while its picture is actually
-visible — this is the intended way to put one on a dashboard.
+**Leaving the card's screen always stops the stream** — another dashboard view,
+a hidden browser tab, or scrolling it away. When you come back:
+
+- `auto_play: false` (default): the last picture and the play button are shown
+  again; you press play to watch. An idle card never wakes the camera.
+- `auto_play: true`: the stream starts again by itself.
+
+So a battery camera is awake only while its picture is actually on screen — the
+intended way to put one on a dashboard.
 
 The card waits up to 45 seconds for the camera to wake and send its first frame
 (a battery camera over the cloud relay is not instant); `max_seconds` only starts
