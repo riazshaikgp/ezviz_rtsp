@@ -7,13 +7,17 @@
 //   entity: camera.front   # or point at the camera entity directly
 //   title: Front door      # optional; defaults to the camera's name
 //   icon: mdi:doorbell     # optional
-//   auto_play: false       # optional; start streaming when the card appears
+//   auto_play: false       # optional; play while the card is on screen
 //   max_seconds: 60        # optional; stop to save battery, 0 = never
 //
 // The card plays Home Assistant's own HLS of the camera (the integration relays
 // the EZVIZ cloud stream for cameras that expose no local RTSP). It is styled
 // after Mushroom cards — rounded card, an icon tile, a media area with a soft
 // play button — but needs neither Mushroom nor any other frontend dependency.
+//
+// To keep a battery camera asleep, the card stops the stream whenever it is not
+// on screen (another dashboard view, another browser tab, scrolled away) or
+// after max_seconds, and starts it again on return when auto_play is on.
 
 const HLS_VERSION = "1.5.20";
 const HLS_URL = `https://cdn.jsdelivr.net/npm/hls.js@${HLS_VERSION}/dist/hls.min.js`;
@@ -185,6 +189,12 @@ class EzvizVideoCard extends HTMLElement {
     this._lang = "en";
     this._state = "idle"; // idle | loading | playing
     this._message = "";
+    // Bumped on every stop so a stream that is still opening cannot finish
+    // after the card was hidden or reloaded.
+    this._gen = 0;
+    // Whether the stream was stopped because the card went out of view, so it
+    // can be resumed when the card is shown again (only if auto_play is on).
+    this._stoppedByVisibility = false;
   }
 
   static getStubConfig() {
@@ -225,11 +235,77 @@ class EzvizVideoCard extends HTMLElement {
   }
 
   connectedCallback() {
+    this._watchVisibility();
     this._maybeAutoPlay();
   }
 
   disconnectedCallback() {
+    this._unwatchVisibility();
     this._stop();
+  }
+
+  // -- visibility ----------------------------------------------------------
+  //
+  // A battery camera must not be kept awake while nobody is looking. The card
+  // stops the stream when it leaves the screen — switching to another
+  // dashboard view, a hidden browser tab, or scrolling it out of sight. When
+  // it comes back and auto_play is on, the stream starts again.
+
+  _watchVisibility() {
+    if (!this._io && "IntersectionObserver" in window) {
+      this._io = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) this._intersecting = entry.isIntersecting;
+          this._evaluateVisibility();
+        },
+        { threshold: 0.01 }
+      );
+      this._io.observe(this);
+    }
+    if (!this._onDocVisibility) {
+      this._onDocVisibility = () => this._evaluateVisibility();
+      document.addEventListener("visibilitychange", this._onDocVisibility);
+    }
+    this._evaluateVisibility();
+  }
+
+  _unwatchVisibility() {
+    this._io?.disconnect();
+    this._io = null;
+    if (this._onDocVisibility) {
+      document.removeEventListener("visibilitychange", this._onDocVisibility);
+      this._onDocVisibility = null;
+    }
+    clearTimeout(this._visTimer);
+    this._visTimer = null;
+  }
+
+  _evaluateVisibility() {
+    // Undefined means the observer has not reported yet: treat as visible so
+    // auto_play can start on first load.
+    const visible =
+      this.isConnected &&
+      !document.hidden &&
+      this._intersecting !== false;
+    clearTimeout(this._visTimer);
+    // Hide promptly to stop the stream, but let the layout settle before
+    // resuming so a view switch does not restart it mid-animation.
+    this._visTimer = setTimeout(
+      () => (visible ? this._onShown() : this._onHidden()),
+      visible ? 250 : 50
+    );
+  }
+
+  _onHidden() {
+    if (this._state !== "playing" && this._state !== "loading") return;
+    this._stoppedByVisibility = true;
+    this._stop(true, "");
+  }
+
+  _onShown() {
+    if (!this._stoppedByVisibility) return;
+    this._stoppedByVisibility = false;
+    if (this._config?.auto_play && this._state === "idle") this._play();
   }
 
   // -- data ----------------------------------------------------------------
@@ -406,6 +482,8 @@ class EzvizVideoCard extends HTMLElement {
 
   async _play() {
     if (this._state === "loading" || this._state === "playing") return;
+    const gen = ++this._gen;
+    this._stoppedByVisibility = false;
     this._state = "loading";
     this._message = "";
     this._render();
@@ -414,6 +492,7 @@ class EzvizVideoCard extends HTMLElement {
     let entity = this._entityId();
     if (!entity && this._config.serial) {
       if (!this._devices) await this._loadDevices();
+      if (gen !== this._gen) return;
       entity = this._findDevice()?.entity_id || null;
     }
     if (!entity) {
@@ -429,10 +508,11 @@ class EzvizVideoCard extends HTMLElement {
         format: "hls",
       });
     } catch (err) {
+      if (gen !== this._gen) return;
       this._fail(t(lang, "could_not_start", { msg: err.message || err.code || err }));
       return;
     }
-    if (!this.isConnected) return;
+    if (gen !== this._gen || !this.isConnected) return;
 
     const video = document.createElement("video");
     video.muted = true;
@@ -449,10 +529,11 @@ class EzvizVideoCard extends HTMLElement {
     } else {
       try {
         const Hls = await loadHls();
+        if (gen !== this._gen) return;
         const hls = new Hls({ liveSyncDurationCount: 3 });
         let started = false;
         hls.on(Hls.Events.ERROR, (_event, data) => {
-          if (data.fatal && !started) {
+          if (data.fatal && !started && gen === this._gen) {
             this._fail(t(lang, "could_not_start", { msg: data.details }));
           }
         });
@@ -463,6 +544,7 @@ class EzvizVideoCard extends HTMLElement {
         hls.attachMedia(video);
         this._hls = hls;
       } catch (err) {
+        if (gen !== this._gen) return;
         this._fail(t(lang, "could_not_start", { msg: err.message || err }));
         return;
       }
@@ -486,6 +568,7 @@ class EzvizVideoCard extends HTMLElement {
   }
 
   _stop(render = false, message = "") {
+    this._gen += 1; // abandon any open that is still in flight
     clearTimeout(this._timer);
     this._timer = null;
     this._hls?.destroy();

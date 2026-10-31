@@ -91,13 +91,18 @@ max_seconds: 60        # optional; stop the stream to protect the battery (0 = n
 | `entity` | — | Use a camera entity directly instead of looking one up by serial. |
 | `title` | camera name | The heading in the card. |
 | `icon` | `mdi:video` | The icon in the tile. |
-| `auto_play` | `true` | Start the stream when the card appears. Set `false` to wait for a tap (gentler on a battery camera). |
-| `max_seconds` | `60` | How long the stream may run before it is stopped automatically. `0` keeps it going until you leave. |
+| `auto_play` | `true` | Start the stream when the card is on screen, and start it again when you come back to it. Set `false` to wait for a tap (gentlest on a battery camera). |
+| `max_seconds` | `60` | How long the stream may run before it is stopped automatically. `0` keeps it going until the card leaves the screen. |
 
 The dashboard shows the camera's **last alarm picture** as a poster, with a play
-button over it — tapping starts the live view, and a **Stop** chip ends it. When
-`auto_play` is off, an idle card never wakes the camera. This is the intended way
-to put a battery camera on a dashboard.
+button over it — tapping starts the live view, and a **Stop** chip ends it.
+
+**The card stops the stream by itself as soon as nobody is looking**: switch to
+another dashboard view, open another browser tab (or hide the app), scroll the
+card out of sight, or let `max_seconds` run out. With `auto_play` on it starts
+again when the card is back on screen; with it off, an idle card never wakes the
+camera. Either way a battery camera is awake only while its picture is actually
+visible — this is the intended way to put one on a dashboard.
 
 There's also a visual editor: the serial becomes a dropdown of your cameras.
 
