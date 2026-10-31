@@ -20,6 +20,7 @@ from homeassistant.const import CONF_TIMEOUT, CONF_TYPE, CONF_URL, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as er
+from homeassistant.loader import async_get_integration
 
 from .const import (
     ATTR_TYPE_CAMERA,
@@ -71,7 +72,12 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     )
     # The file is served with a long cache, so the URL carries a hash of its
     # content: any change to the card reaches browsers on the next page load.
-    add_extra_js_url(hass, f"{CARD_URL}?v={hashlib.sha256(content).hexdigest()[:12]}")
+    # The integration version rides along, so the card can print it in the
+    # console and it can never drift from the manifest.
+    integration = await async_get_integration(hass, DOMAIN)
+    version = integration.version or "?"
+    query = f"v={hashlib.sha256(content).hexdigest()[:12]}&version={version}"
+    add_extra_js_url(hass, f"{CARD_URL}?{query}")
 
     from .websocket import async_register_commands
 

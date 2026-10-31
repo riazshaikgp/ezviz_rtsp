@@ -28,6 +28,16 @@ const HLS_SRI = "sha384-V5ruNBgmYcC3SJRUQeNykAAAgde5gOFq/Hu0CZj7bygDP0yRIhkvX8+w
 // counts from the first frame; this is a separate cap on the wait for it.
 const STARTUP_SECONDS = 45;
 
+// The integration appends its version to the module URL, so the card reports
+// which build is running and it can never drift from the manifest.
+const CARD_VERSION = (() => {
+  try {
+    return new URL(import.meta.url).searchParams.get("version") || "?";
+  } catch {
+    return "?";
+  }
+})();
+
 // hls.js is loaded once per page, only when a browser can't play HLS natively.
 let hlsLoading = null;
 const loadHls = () => {
@@ -622,7 +632,7 @@ class EzvizVideoCard extends HTMLElement {
     this._started = true;
     clearTimeout(this._startupTimer);
     this._startupTimer = null;
-    console.info("[ezviz-video-card] streaming", this._entityId() || this._config.serial);
+    console.info(`[ezviz-video-card] v${CARD_VERSION} streaming`, this._entityId() || this._config.serial);
     if (this._header) {
       this._header.dot.classList.add("on");
       this._header.status.textContent = t(lang, "live");
@@ -637,7 +647,7 @@ class EzvizVideoCard extends HTMLElement {
   }
 
   _fail(message) {
-    console.warn("[ezviz-video-card]", message);
+    console.warn(`[ezviz-video-card] v${CARD_VERSION}`, message);
     this._stop();
     this._state = "idle";
     this._message = message;
@@ -765,6 +775,6 @@ const define = () => {
   }
 };
 define();
-console.info("[ezviz-video-card] loaded (custom:ezviz-video-card)");
+console.info(`[ezviz-video-card] loaded v${CARD_VERSION} (custom:ezviz-video-card)`);
 const watchRegistry = setInterval(define, 100);
 setTimeout(() => clearInterval(watchRegistry), 30000);

@@ -133,6 +133,8 @@ async def test_battery_camera_sets_up_and_offers_a_cloud_stream(hass) -> None:
     assert any(
         "/ezviz_rtsp/ezviz-video-card.js" in url for url in module_urls
     ), module_urls
+    # The URL carries the integration version, so the card can log it.
+    assert any("version=" in url for url in module_urls), module_urls
 
 
 async def test_card_file_is_served(hass, hass_client) -> None:
