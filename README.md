@@ -48,10 +48,6 @@ HAOS), then restart.
 
 </details>
 
-> Upgrading from an earlier copy of this project under the old name? Delete the
-> old `config/custom_components/ezviz/` folder — otherwise it keeps shadowing
-> the built-in integration.
-
 ---
 
 ## First run
