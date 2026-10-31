@@ -237,3 +237,14 @@ in [`NOTICE`](NOTICE).
 
 EZVIZ is a trademark of its owner. This is an independent, unofficial project
 with no affiliation to or endorsement from EZVIZ.
+
+---
+
+## Support
+
+If this project saved you some time, you can buy me a coffee — it keeps the
+battery cameras streaming.
+
+[![Buy Me a Coffee at ko-fi.com](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/tarasifua)
+
+[ko-fi.com/tarasifua](https://ko-fi.com/tarasifua)
