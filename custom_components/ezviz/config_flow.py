@@ -48,7 +48,6 @@ from .const import (
     ATTR_TYPE_CLOUD,
     CONF_CODE,
     CONF_CODES,
-    CONF_ENCRYPTION_PASSWORD,
     CONF_FFMPEG_ARGUMENTS,
     CONF_MFA,
     CONF_RFSESSION_ID,
@@ -119,7 +118,7 @@ class EzvizConfigFlow(ConfigFlow, domain=DOMAIN):
     unique_id: str
     # The sign-in waiting for the MFA code EZVIZ sent, if any.
     _mfa_data: dict[str, Any] | None = None
-    _mfa_action: str = "user"
+    _mfa_action: str = "create"
 
     async def _validate_and_create_camera_rtsp(self, data: dict) -> ConfigFlowResult:
         """Try DESCRIBE on RTSP camera with credentials."""
@@ -233,7 +232,7 @@ class EzvizConfigFlow(ConfigFlow, domain=DOMAIN):
         data_schema = probatio.Schema(
             {
                 probatio.Required(CONF_USERNAME): str,
-                probatio.Required(probatio.Secret(CONF_PASSWORD)): str,
+                probatio.Required(CONF_PASSWORD): str,
                 probatio.Required(CONF_URL, default=EU_URL): probatio.In(
                     [EU_URL, RUSSIA_URL, CONF_CUSTOMIZE]
                 ),
@@ -342,7 +341,7 @@ class EzvizConfigFlow(ConfigFlow, domain=DOMAIN):
         discovered_camera_schema = probatio.Schema(
             {
                 probatio.Required(CONF_USERNAME, default=DEFAULT_CAMERA_USERNAME): str,
-                probatio.Required(probatio.Secret(CONF_PASSWORD)): str,
+                probatio.Required(CONF_PASSWORD): str,
             }
         )
 
@@ -460,7 +459,7 @@ class EzvizConfigFlow(ConfigFlow, domain=DOMAIN):
                 probatio.Required(CONF_USERNAME, default=entry.title): probatio.In(
                     [entry.title]
                 ),
-                probatio.Required(probatio.Secret(CONF_PASSWORD)): str,
+                probatio.Required(CONF_PASSWORD): str,
             }
         )
 
@@ -485,39 +484,30 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
     async def async_step_general(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Request timeout, ffmpeg arguments and the alarm-image password."""
+        """Request timeout and ffmpeg arguments."""
         if user_input is not None:
             return self.async_create_entry(
                 title="", data={**self.config_entry.options, **user_input}
             )
 
-        fields: dict[probatio.Marker, Any] = {
-            probatio.Optional(
-                CONF_TIMEOUT,
-                default=self.config_entry.options.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
-            ): int,
-            probatio.Optional(
-                CONF_FFMPEG_ARGUMENTS,
-                default=self.config_entry.options.get(
-                    CONF_FFMPEG_ARGUMENTS, DEFAULT_FFMPEG_ARGUMENTS
-                ),
-            ): str,
-        }
-        # Alarm pictures can be encrypted with a password that differs from
-        # the verification code used for the RTSP stream.
-        if self.config_entry.data[CONF_TYPE] == ATTR_TYPE_CAMERA:
-            fields[
+        options = probatio.Schema(
+            {
                 probatio.Optional(
-                    CONF_ENCRYPTION_PASSWORD,
-                    description={
-                        "suggested_value": self.config_entry.options.get(
-                            CONF_ENCRYPTION_PASSWORD
-                        )
-                    },
-                )
-            ] = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
+                    CONF_TIMEOUT,
+                    default=self.config_entry.options.get(
+                        CONF_TIMEOUT, DEFAULT_TIMEOUT
+                    ),
+                ): int,
+                probatio.Optional(
+                    CONF_FFMPEG_ARGUMENTS,
+                    default=self.config_entry.options.get(
+                        CONF_FFMPEG_ARGUMENTS, DEFAULT_FFMPEG_ARGUMENTS
+                    ),
+                ): str,
+            }
+        )
 
-        return self.async_show_form(step_id="general", data_schema=probatio.Schema(fields))
+        return self.async_show_form(step_id="general", data_schema=options)
 
     async def async_step_codes(
         self, user_input: dict[str, Any] | None = None
@@ -525,7 +515,7 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
         """Set the verification code of a cloud camera, for encrypted video.
 
         Only cameras with video encryption turned on need one; the code decrypts
-        the live stream inside Home Assistant and never reaches a browser.
+        the cloud live stream inside Home Assistant and never reaches a browser.
         """
         options = self.config_entry.options
         codes: dict[str, str] = dict(options.get(CONF_CODES, {}))
@@ -537,9 +527,7 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
                 codes[serial] = code
             else:
                 codes.pop(serial, None)
-            return self.async_create_entry(
-                title="", data={**options, CONF_CODES: codes}
-            )
+            return self.async_create_entry(title="", data={**options, CONF_CODES: codes})
 
         cameras = self._async_cloud_cameras()
         if not cameras:

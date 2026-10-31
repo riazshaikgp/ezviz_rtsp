@@ -13,7 +13,10 @@ from homeassistant.config_entries import SOURCE_IGNORE, SOURCE_INTEGRATION_DISCO
 from homeassistant.const import CONF_IP_ADDRESS, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import discovery_flow
-from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.entity_platform import (
+    AddConfigEntryEntitiesCallback,
+    async_get_current_platform,
+)
 
 from .const import (
     ATTR_SERIAL,
@@ -21,6 +24,7 @@ from .const import (
     DEFAULT_CAMERA_USERNAME,
     DEFAULT_FFMPEG_ARGUMENTS,
     DOMAIN,
+    SERVICE_WAKE_DEVICE,
 )
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
 from .entity import EzvizEntity
@@ -35,7 +39,10 @@ def _is_battery_camera(data: dict) -> bool:
     EZVIZ reports a battery level or a battery work mode for these; they expose
     no RTSP server, so the local ``rtsp://`` source can never play them.
     """
-    return data.get("battery_level") is not None or data.get("battery_camera_work_mode") is not None
+    return (
+        data.get("battery_level") is not None
+        or data.get("battery_camera_work_mode") is not None
+    )
 
 
 async def async_setup_entry(
@@ -69,6 +76,7 @@ async def async_setup_entry(
                 value["local_rtsp_port"],
                 ffmpeg_arguments,
             )
+
         else:
             # No local RTSP: play the camera through the EZVIZ cloud instead.
             # Battery cameras never answer RTSP, so don't ask for credentials.
@@ -111,6 +119,12 @@ async def async_setup_entry(
         )
 
     async_add_entities(camera_entities)
+
+    platform = async_get_current_platform()
+
+    platform.async_register_entity_service(
+        SERVICE_WAKE_DEVICE, None, "perform_wake_device"
+    )
 
 
 class EzvizCamera(EzvizEntity, Camera):
