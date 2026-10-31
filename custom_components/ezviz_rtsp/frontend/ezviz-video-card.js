@@ -576,6 +576,7 @@ class EzvizVideoCard extends HTMLElement {
     this._started = true;
     clearTimeout(this._startupTimer);
     this._startupTimer = null;
+    console.info("[ezviz-video-card] streaming", this._entityId() || this._config.serial);
     if (this._header) {
       this._header.dot.classList.add("on");
       this._header.status.textContent = t(lang, "live");
@@ -590,6 +591,7 @@ class EzvizVideoCard extends HTMLElement {
   }
 
   _fail(message) {
+    console.warn("[ezviz-video-card]", message);
     this._stop();
     this._state = "idle";
     this._message = message;
@@ -717,5 +719,6 @@ const define = () => {
   }
 };
 define();
+console.info("[ezviz-video-card] loaded (custom:ezviz-video-card)");
 const watchRegistry = setInterval(define, 100);
 setTimeout(() => clearInterval(watchRegistry), 30000);
