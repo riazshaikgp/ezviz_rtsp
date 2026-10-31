@@ -42,6 +42,16 @@ Or add it by hand:
 4. Find **Ezviz Cloud with Video** in the list, install it, restart Home Assistant.
 
 <details>
+<summary>Bleeding edge (the <code>main</code> branch)</summary>
+
+Releases are the stable channel. To always run the latest committed changes,
+open the integration in HACS → **⋮ → Redownload** and pick **`main`** (the
+default branch) instead of a release. HACS then offers an update every time the
+branch moves — no release needed. Switch back to a release the same way.
+
+</details>
+
+<details>
 <summary>No HACS? Copy the folder</summary>
 
 Drop `custom_components/ezviz_rtsp/` into `config/custom_components/ezviz_rtsp/`
