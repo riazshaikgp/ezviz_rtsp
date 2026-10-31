@@ -599,12 +599,16 @@ class EzvizVideoCard extends HTMLElement {
     this._render();
 
     const url = new URL(stream.url, window.location.origin).toString();
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = url;
-    } else {
-      try {
-        const Hls = await loadHls();
-        if (gen !== this._gen) return;
+    // Prefer hls.js whenever Media Source Extensions are available, exactly as
+    // Home Assistant's own ha-hls-player does. Chromium browsers (Brave among
+    // them) answer canPlayType("application/vnd.apple.mpegurl") with "maybe"
+    // yet cannot demux the stream (DEMUXER_ERROR_COULD_NOT_PARSE), so the
+    // browser's native HLS must be the fallback, never the first choice.
+    let useNative = false;
+    try {
+      const Hls = await loadHls();
+      if (gen !== this._gen) return;
+      if (Hls.isSupported()) {
         const hls = new Hls({ liveSyncDurationCount: 3 });
         let started = false;
         hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -618,12 +622,14 @@ class EzvizVideoCard extends HTMLElement {
         hls.loadSource(url);
         hls.attachMedia(video);
         this._hls = hls;
-      } catch (err) {
-        if (gen !== this._gen) return;
-        this._fail(t(lang, "could_not_start", { msg: err.message || err }));
-        return;
+      } else {
+        useNative = true;
       }
+    } catch {
+      // hls.js could not be fetched; fall back to the browser's own player.
+      useNative = true;
     }
+    if (useNative) video.src = url;
 
     // The first frame can take a while on a battery camera; only then does the
     // max_seconds countdown start, so a short limit never cuts off the wake-up.
