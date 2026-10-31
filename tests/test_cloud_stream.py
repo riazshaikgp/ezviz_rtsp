@@ -214,6 +214,37 @@ async def test_stored_code_is_ignored_for_a_clear_camera(upstream) -> None:
     await stream.async_close()
 
 
+async def test_battery_stream_has_a_hard_session_limit(upstream) -> None:
+    # A battery camera must be closed even if a reader never lets go.
+    stream = LiveStream(
+        _hass(), _coordinator(), "BK1", 1, lambda: None, battery=True
+    )
+    frames = stream.frames()
+    pending = asyncio.ensure_future(anext(frames))
+    await asyncio.sleep(0)
+    upstream.queue.put_nowait(IMKH + KEY + PACK)
+    assert await pending == KEY
+    assert stream._deadline is not None
+    stream._session_timeout()
+    await asyncio.sleep(0)
+    with pytest.raises(StopAsyncIteration):
+        await anext(frames)
+    await frames.aclose()
+    await stream.async_close()
+
+
+async def test_powered_stream_has_no_hard_limit(upstream) -> None:
+    stream = _stream()
+    frames = stream.frames()
+    pending = asyncio.ensure_future(anext(frames))
+    await asyncio.sleep(0)
+    upstream.queue.put_nowait(IMKH + KEY + PACK)
+    assert await pending == KEY
+    assert stream._deadline is None
+    await frames.aclose()
+    await stream.async_close()
+
+
 # --- LiveStreamView -----------------------------------------------------------
 
 

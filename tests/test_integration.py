@@ -101,6 +101,8 @@ async def test_battery_camera_sets_up_and_offers_a_cloud_stream(hass) -> None:
 
     # The cloud stream was built for the camera, and the view registered.
     assert set(entry.runtime_data.live_streams) == {"BK1"}
+    # A battery camera's stream carries a hard session cap (never left streaming).
+    assert entry.runtime_data.live_streams["BK1"].battery is True
     assert hass.data[DATA_LIVE_VIEW] is True
 
     # A battery camera must not trigger the RTSP discovery flow.

@@ -51,6 +51,10 @@ LINGER = 20
 # After an open that gave no video, refuse new opens for this long instead of
 # waking the camera again for every retry.
 COOLDOWN = 60
+# A battery camera must never be left streaming: even if a reader misbehaves
+# (a browser that forgot to stop), the cloud session is closed after this long.
+# It only applies to battery cameras; powered ones may stream as long as asked.
+MAX_SESSION = 300
 
 # A reader this far behind (about 30 s of video) is dropped instead of buffered.
 _MAX_BACKLOG = 450
@@ -80,6 +84,7 @@ class LiveStream:
         token: str | None = None,
         transcode: bool = False,
         encrypted: bool = False,
+        battery: bool = False,
     ) -> None:
         self._hass = hass
         self._coordinator = coordinator
@@ -88,9 +93,12 @@ class LiveStream:
         self._code = code
         # A verification code only means something when the camera encrypts video.
         self.encrypted = encrypted
+        # A battery camera gets a hard cap on how long it may stream (MAX_SESSION).
+        self.battery = battery
         self._readers: set[asyncio.Queue[_Item]] = set()
         self._task: asyncio.Task[None] | None = None
         self._linger: asyncio.TimerHandle | None = None
+        self._deadline: asyncio.TimerHandle | None = None
         self._cooldown_until = 0.0
         # Whether the current open has handed a keyframe to its readers.
         self._video = False
@@ -127,6 +135,8 @@ class LiveStream:
             self._linger.cancel()
             self._linger = None
         if self._task is None:
+            if self.battery and self._deadline is None:
+                self._deadline = loop.call_later(MAX_SESSION, self._session_timeout)
             self._task = self._hass.async_create_background_task(
                 self._run(), f"{DOMAIN} live {self.serial}"
             )
@@ -155,6 +165,19 @@ class LiveStream:
                 self._no_video()
             self._task.cancel()
 
+    def _session_timeout(self) -> None:
+        """Close a battery camera's stream after MAX_SESSION, whatever readers do."""
+        if self._deadline is not None:
+            self._deadline.cancel()
+            self._deadline = None
+        if self._task is not None:
+            _LOGGER.info(
+                "Live view of %s hit its %d s battery limit; stopping it now",
+                self.serial,
+                MAX_SESSION,
+            )
+            self._task.cancel()
+
     def _no_video(self) -> None:
         self._cooldown_until = asyncio.get_running_loop().time() + COOLDOWN
         if self.on_no_video is not None:
@@ -165,6 +188,9 @@ class LiveStream:
         if self._linger is not None:
             self._linger.cancel()
             self._linger = None
+        if self._deadline is not None:
+            self._deadline.cancel()
+            self._deadline = None
         if (task := self._task) is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -220,6 +246,11 @@ class LiveStream:
             raise
         finally:
             self._task = None
+            if self._deadline is not None:
+                self._deadline.cancel()
+                self._deadline = None
+            if started:
+                _LOGGER.info("Live view of %s stopped", self.serial)
             if not self._video and not closed:
                 self._no_video()
                 end = end or EzvizStreamError("The camera sent no video")
@@ -407,6 +438,12 @@ def async_setup_live_streams(
         def _code(serial: str = serial) -> str | None:
             return entry.options.get(CONF_CODES, {}).get(serial)
 
+        # A battery camera gets a hard session cap, so it can never be left
+        # streaming and draining (see LiveStream.battery / MAX_SESSION).
+        battery = (
+            value.get("battery_level") is not None
+            or value.get("battery_camera_work_mode") is not None
+        )
         coordinator.live_streams[serial] = LiveStream(
             hass,
             coordinator,
@@ -416,6 +453,7 @@ def async_setup_live_streams(
             token=token,
             transcode=transcode,
             encrypted=bool(value.get("encrypted")),
+            battery=battery,
         )
 
 

@@ -108,6 +108,22 @@ The card waits up to 45 seconds for the camera to wake and send its first frame
 (a battery camera over the cloud relay is not instant); `max_seconds` only starts
 counting once the picture is on screen.
 
+**A battery camera can never be left streaming.** Three things have to agree
+before it stays awake, and any one of them ends it:
+
+1. The **card** stops the stream as soon as it leaves the screen or `max_seconds`
+   runs out, and releases the HLS reader.
+2. The **integration** closes the cloud session **20 seconds** after the last
+   reader leaves (`LINGER` in `live.py`).
+3. Even if a client misbehaves entirely, a battery camera is cut off after
+   **5 minutes** of one continuous stream (`MAX_SESSION` in `live.py`); powered
+   cameras are not capped.
+
+Every open and close is written to the Home Assistant log
+(`Live view of <serial> is streaming` / `… stopped` / `… hit its N s battery
+limit`), so you can confirm in the log that the camera actually went back to
+sleep.
+
 There's also a visual editor: the serial becomes a dropdown of your cameras.
 
 ---

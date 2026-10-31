@@ -204,6 +204,8 @@ class EzvizVideoCard extends HTMLElement {
     // Whether the first frame has reached the screen (max_seconds counts from it).
     this._started = false;
     this._startupTimer = null;
+    // A pause the user asked for (video controls) must not be auto-undone.
+    this._userPaused = false;
   }
 
   static getStubConfig() {
@@ -255,66 +257,97 @@ class EzvizVideoCard extends HTMLElement {
 
   // -- visibility ----------------------------------------------------------
   //
-  // A battery camera must not be kept awake while nobody is looking. The card
-  // stops the stream when it leaves the screen — switching to another
-  // dashboard view, a hidden browser tab, or scrolling it out of sight. When
-  // it comes back and auto_play is on, the stream starts again.
+  // A battery camera must not be kept awake while nobody is looking, and a live
+  // stream must be re-opened when the card returns. Lovelace keeps an inactive
+  // view in the DOM, so IntersectionObserver is not reliable here; the card
+  // polls its own geometry instead, and reacts at once to a hidden browser tab.
 
   _watchVisibility() {
+    if (!this._visTimer) {
+      this._visTimer = setInterval(() => this._syncVisibility(), 1000);
+    }
     if (!this._io && "IntersectionObserver" in window) {
+      // A second signal for the card scrolled off screen (Lovelace may keep an
+      // inactive view laid out, just out of sight).
       this._io = new IntersectionObserver(
         (entries) => {
           for (const entry of entries) this._intersecting = entry.isIntersecting;
-          this._evaluateVisibility();
+          this._syncVisibility();
         },
-        { threshold: 0.01 }
+        { threshold: 0 }
       );
       this._io.observe(this);
     }
     if (!this._onDocVisibility) {
-      this._onDocVisibility = () => this._evaluateVisibility();
+      this._onDocVisibility = () => this._syncVisibility();
       document.addEventListener("visibilitychange", this._onDocVisibility);
     }
-    this._evaluateVisibility();
+    this._syncVisibility();
   }
 
   _unwatchVisibility() {
+    clearInterval(this._visTimer);
+    this._visTimer = null;
     this._io?.disconnect();
     this._io = null;
     if (this._onDocVisibility) {
       document.removeEventListener("visibilitychange", this._onDocVisibility);
       this._onDocVisibility = null;
     }
-    clearTimeout(this._visTimer);
-    this._visTimer = null;
   }
 
-  _evaluateVisibility() {
-    // Undefined means the observer has not reported yet: treat as visible so
-    // auto_play can start on first load.
-    const visible =
-      this.isConnected &&
-      !document.hidden &&
-      this._intersecting !== false;
-    clearTimeout(this._visTimer);
-    // Hide promptly to stop the stream, but let the layout settle before
-    // resuming so a view switch does not restart it mid-animation.
-    this._visTimer = setTimeout(
-      () => (visible ? this._onShown() : this._onHidden()),
-      visible ? 250 : 50
-    );
+  _isVisible() {
+    if (!this.isConnected || document.hidden) return false;
+    if (this._intersecting === false) return false;
+    const rect = this.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return false;
+    const style = getComputedStyle(this);
+    return style.display !== "none" && style.visibility !== "hidden";
+  }
+
+  _syncVisibility() {
+    if (!this._config) return;
+    const visible = this._isVisible();
+    if (visible !== this._visible) {
+      this._visible = visible;
+      if (visible) this._onShown();
+      else this._onHidden();
+      return;
+    }
+    if (visible) this._ensurePlaying();
   }
 
   _onHidden() {
     if (this._state !== "playing" && this._state !== "loading") return;
     this._stoppedByVisibility = true;
+    // A browser-induced pause must not be mistaken for the user pausing; only a
+    // pause while the card is on screen counts as the user's.
+    this._userPaused = false;
     this._stop(true, "");
   }
 
   _onShown() {
-    if (!this._stoppedByVisibility) return;
-    this._stoppedByVisibility = false;
-    if (this._config?.auto_play && this._state === "idle") this._play();
+    this._userPaused = false;
+    if (this._stoppedByVisibility) {
+      this._stoppedByVisibility = false;
+      if (this._config?.auto_play && this._state === "idle") this._play();
+      return;
+    }
+    // The stream was not stopped (the view was never seen as hidden): a live
+    // HLS that the browser paused while away is stale, so start it over.
+    if (this._state === "playing" && this._started) this._restart();
+  }
+
+  _ensurePlaying() {
+    if (this._userPaused || this._state !== "playing" || !this._started) return;
+    const video = this._video;
+    if (video && video.paused) video.play().catch(() => {});
+  }
+
+  _restart() {
+    this._stop();
+    this._state = "idle";
+    this._play();
   }
 
   // -- data ----------------------------------------------------------------
@@ -528,6 +561,19 @@ class EzvizVideoCard extends HTMLElement {
     video.autoplay = true;
     video.playsInline = true;
     video.controls = true;
+    // A pause while the card is on screen is the user's (video controls); a
+    // pause while it is off screen is the browser's and must be undone.
+    video.addEventListener("pause", () => {
+      if (this._video === video && this._started && this._state === "playing" && this._isVisible()) {
+        this._userPaused = true;
+      }
+    });
+    video.addEventListener("play", () => {
+      this._userPaused = false;
+    });
+    video.addEventListener("canplay", () => {
+      if (this._video === video) video.play().catch(() => {});
+    });
     this._video = video;
     this._state = "playing";
     this._render();
