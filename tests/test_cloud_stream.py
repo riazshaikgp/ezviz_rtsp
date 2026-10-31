@@ -7,13 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.ezviz import live
-from custom_components.ezviz.cloud_stream import (
+from custom_components.ezviz_rtsp import live
+from custom_components.ezviz_rtsp.cloud_stream import (
     PackSplitter,
     decrypt_packs,
 )
-from custom_components.ezviz.const import DOMAIN
-from custom_components.ezviz.live import (
+from custom_components.ezviz_rtsp.const import DOMAIN
+from custom_components.ezviz_rtsp.live import (
     EzvizCloudCooldownError,
     LiveStream,
     LiveStreamView,
@@ -134,7 +134,7 @@ def test_splitter_keeps_everything_without_skip() -> None:
 def test_decrypt_packs_decrypts_together_and_cuts_back(monkeypatch) -> None:
     calls = []
     monkeypatch.setattr(
-        "custom_components.ezviz.cloud_stream._decrypt",
+        "custom_components.ezviz_rtsp.cloud_stream._decrypt",
         lambda ps, code, codec: calls.append((ps, code, codec)) or ps.upper(),
     )
     assert decrypt_packs([b"ab", b"cde"], "KEY", "h264") == [b"AB", b"CDE"]
@@ -339,7 +339,7 @@ def test_stream_source_uses_the_ha_port_and_token() -> None:
     hass.config.api.port = 8123
     stream = MagicMock(serial="BK1", token="tok")
     assert stream_source(hass, stream) == (
-        "http://127.0.0.1:8123/api/ezviz/live/BK1?token=tok"
+        "http://127.0.0.1:8123/api/ezviz_rtsp/live/BK1?token=tok"
     )
 
 
@@ -356,14 +356,14 @@ async def test_close_live_streams_closes_everyone() -> None:
 
 
 def test_camera_uses_the_cloud_stream_without_rtsp() -> None:
-    from custom_components.ezviz.camera import EzvizCamera
+    from custom_components.ezviz_rtsp.camera import EzvizCamera
 
     hass = MagicMock()
     hass.config.api.use_ssl = False
     hass.config.api.port = 8123
     coordinator = _coordinator()
     coordinator.live_streams = {"BK1": LiveStream(hass, coordinator, "BK1", 1, lambda: None)}
-    with patch("custom_components.ezviz.camera.get_ffmpeg_manager"):
+    with patch("custom_components.ezviz_rtsp.camera.get_ffmpeg_manager"):
         camera = EzvizCamera(
             hass,
             coordinator,
@@ -379,13 +379,13 @@ def test_camera_uses_the_cloud_stream_without_rtsp() -> None:
     camera.hass = hass
     camera.entity_id = "camera.door"
     assert asyncio.run(camera.stream_source()) == (
-        "http://127.0.0.1:8123/api/ezviz/live/BK1?token="
+        "http://127.0.0.1:8123/api/ezviz_rtsp/live/BK1?token="
         + coordinator.live_streams["BK1"].token
     )
 
 
 def test_battery_camera_is_detected() -> None:
-    from custom_components.ezviz.camera import _is_battery_camera
+    from custom_components.ezviz_rtsp.camera import _is_battery_camera
 
     assert _is_battery_camera({"battery_level": 52})
     assert _is_battery_camera({"battery_camera_work_mode": 5})
@@ -393,9 +393,9 @@ def test_battery_camera_is_detected() -> None:
 
 
 def _cloud_camera(coordinator, hass) -> object:
-    from custom_components.ezviz.camera import EzvizCamera
+    from custom_components.ezviz_rtsp.camera import EzvizCamera
 
-    with patch("custom_components.ezviz.camera.get_ffmpeg_manager"):
+    with patch("custom_components.ezviz_rtsp.camera.get_ffmpeg_manager"):
         camera = EzvizCamera(
             hass, coordinator, "BK1", "admin", None, "", 554, "/x", use_cloud=True
         )
@@ -426,7 +426,7 @@ async def test_cloud_still_fetches_the_alarm_picture() -> None:
     session = MagicMock()
     session.get = MagicMock(return_value=ctx)
     with patch(
-        "custom_components.ezviz.camera.async_get_clientsession", return_value=session
+        "custom_components.ezviz_rtsp.camera.async_get_clientsession", return_value=session
     ):
         assert await camera._async_cloud_still() == b"\xff\xd8pic"
 
@@ -435,7 +435,7 @@ async def test_cloud_still_fetches_the_alarm_picture() -> None:
 
 
 def _options_flow(data: dict) -> MagicMock:
-    from custom_components.ezviz.config_flow import EzvizOptionsFlowHandler
+    from custom_components.ezviz_rtsp.config_flow import EzvizOptionsFlowHandler
 
     flow = EzvizOptionsFlowHandler()
     entry = MagicMock(options={}, data={"type_value": "EZVIZ_CLOUD_ACCOUNT"})
@@ -449,7 +449,7 @@ def _options_flow(data: dict) -> MagicMock:
 
 @pytest.fixture(autouse=True)
 def _config_entry_property():
-    from custom_components.ezviz.config_flow import EzvizOptionsFlowHandler
+    from custom_components.ezviz_rtsp.config_flow import EzvizOptionsFlowHandler
 
     with patch.object(
         EzvizOptionsFlowHandler,
@@ -462,7 +462,7 @@ def _config_entry_property():
 async def test_options_codes_step_lists_cloud_cameras() -> None:
     flow, entry = _options_flow({})
     entry.runtime_data.data = {"BK1": {"name": "Door"}}
-    with patch("custom_components.ezviz.config_flow.uses_cloud_stream", return_value=True):
+    with patch("custom_components.ezviz_rtsp.config_flow.uses_cloud_stream", return_value=True):
         result = await flow.async_step_codes()
     assert result["type"] == "form"
     options = result["data_schema"].schema["serial"].config["options"]

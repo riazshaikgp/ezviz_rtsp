@@ -10,7 +10,7 @@ from homeassistant.const import CONF_TYPE, CONF_URL, Platform
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.ezviz.const import (
+from custom_components.ezviz_rtsp.const import (
     ATTR_TYPE_CLOUD,
     CONF_RFSESSION_ID,
     CONF_SESSION_ID,
@@ -76,12 +76,12 @@ async def _setup(hass) -> MockConfigEntry:
     entry.add_to_hass(hass)
     # Only the camera platform: the cloud stream is what this fork adds.
     with (
-        patch("custom_components.ezviz.EzvizClient", _FakeClient),
+        patch("custom_components.ezviz_rtsp.EzvizClient", _FakeClient),
         patch.dict(
-            "custom_components.ezviz.PLATFORMS_BY_TYPE",
+            "custom_components.ezviz_rtsp.PLATFORMS_BY_TYPE",
             {ATTR_TYPE_CLOUD: [Platform.CAMERA]},
         ),
-        patch("custom_components.ezviz.camera.get_ffmpeg_manager"),
+        patch("custom_components.ezviz_rtsp.camera.get_ffmpeg_manager"),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()

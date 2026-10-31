@@ -1,3 +1,14 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Tools
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# macOS
+.DS_Store

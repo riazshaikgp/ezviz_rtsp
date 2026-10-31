@@ -1,0 +1,60 @@
+Ezviz Cloud with Video for Home Assistant
+=========================================
+
+Copyright (c) 2026 the Ezviz Cloud with Video authors.
+
+This project is a fork and combines code from two upstream projects. The full
+attribution and license notices for each are below.
+
+1. Home Assistant Core — EZVIZ integration
+------------------------------------------
+Source: https://github.com/home-assistant/core/tree/dev/homeassistant/components/ezviz
+License: Apache License 2.0 (see LICENSE)
+Copyright the Home Assistant authors.
+
+The whole integration is derived from it; every platform file (alarm panel,
+binary sensor, button, camera, config flow, const, coordinator, entity, image,
+light, number, select, sensor, siren, switch, update, strings, icons) is taken
+from there, with the cloud live-stream additions described in the README.
+
+Original EZVIZ integration author / codeowner: RenierM26 (@RenierM26).
+
+2. ezviz-cloud-hass
+-------------------
+Source: https://github.com/bvis/ezviz-cloud-hass
+License: MIT
+Copyright (c) 2026 Basilio Vera (@bvis).
+
+The cloud (VTM) live-view code in this fork (custom_components/ezviz_rtsp/
+cloud_stream.py and live.py, and the cloud branches of camera.py and
+config_flow.py) is adapted from it.
+
+--------------------------------------------------------------------------
+MIT License (for the ezviz-cloud-hass derived parts)
+
+Copyright (c) 2026 Basilio Vera
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------
+EZVIZ is a trademark of its owner. This project is not affiliated with,
+endorsed by or supported by EZVIZ. The brand icon under
+custom_components/ezviz_rtsp/brand/ is the EZVIZ brand image published in
+https://github.com/home-assistant/brands for the Home Assistant EZVIZ
+integration, with an added "video" badge; the brand logo is used unchanged.
