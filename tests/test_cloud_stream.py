@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from homeassistant.config_entries import ConfigEntryState
 
 from custom_components.ezviz import live
 from custom_components.ezviz.cloud_stream import (
