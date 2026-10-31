@@ -1,7 +1,7 @@
 {
   "domain": "ezviz_rtsp",
   "name": "Ezviz Cloud with Video",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "codeowners": ["@tarasifua"],
   "config_flow": true,
   "dependencies": ["ffmpeg", "frontend", "http", "websocket_api"],
