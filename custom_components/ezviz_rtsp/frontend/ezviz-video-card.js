@@ -24,6 +24,10 @@ const HLS_URL = `https://cdn.jsdelivr.net/npm/hls.js@${HLS_VERSION}/dist/hls.min
 // sha384 of that file; update it with the version.
 const HLS_SRI = "sha384-V5ruNBgmYcC3SJRUQeNykAAAgde5gOFq/Hu0CZj7bygDP0yRIhkvX8+w0u/7mRvr";
 
+// A battery camera takes a while to wake and send its first frame. max_seconds
+// counts from the first frame; this is a separate cap on the wait for it.
+const STARTUP_SECONDS = 45;
+
 // hls.js is loaded once per page, only when a browser can't play HLS natively.
 let hlsLoading = null;
 const loadHls = () => {
@@ -44,11 +48,12 @@ const STRINGS = /* translations */ {
   "en": {
     "play": "Watch live",
     "stop": "Stop",
-    "starting": "Starting video…",
+    "starting": "Waking the camera…",
     "loading": "Loading…",
     "live": "Live",
     "idle": "Tap to watch",
-    "no_video": "No video after {s} s",
+    "no_video": "Stopped after {s} s",
+    "no_start": "The camera sent no video. It may still be waking up — try again.",
     "no_entity": "Camera not found in this account",
     "could_not_start": "Couldn't start the video: {msg}",
     "serial": "Camera",
@@ -60,11 +65,12 @@ const STRINGS = /* translations */ {
   "uk": {
     "play": "Дивитися наживо",
     "stop": "Зупинити",
-    "starting": "Запуск відео…",
+    "starting": "Прокидаємо камеру…",
     "loading": "Завантаження…",
     "live": "Наживо",
     "idle": "Торкніться, щоб дивитися",
-    "no_video": "Немає відео після {s} с",
+    "no_video": "Зупинено через {s} с",
+    "no_start": "Камера не надіслала відео. Можливо, ще прокидається — спробуйте ще раз.",
     "no_entity": "Камеру не знайдено в цьому акаунті",
     "could_not_start": "Не вдалося запустити відео: {msg}",
     "serial": "Камера",
@@ -195,6 +201,9 @@ class EzvizVideoCard extends HTMLElement {
     // Whether the stream was stopped because the card went out of view, so it
     // can be resumed when the card is shown again (only if auto_play is on).
     this._stoppedByVisibility = false;
+    // Whether the first frame has reached the screen (max_seconds counts from it).
+    this._started = false;
+    this._startupTimer = null;
   }
 
   static getStubConfig() {
@@ -385,7 +394,7 @@ class EzvizVideoCard extends HTMLElement {
     const secondary = document.createElement("div");
     secondary.className = "secondary";
     const dot = document.createElement("span");
-    dot.className = "dot" + (this._state === "playing" ? " on" : "");
+    dot.className = "dot" + (this._started ? " on" : "");
     const status = document.createElement("span");
     status.textContent = this._statusText();
     secondary.append(dot, status);
@@ -442,11 +451,11 @@ class EzvizVideoCard extends HTMLElement {
   }
 
   _statusText() {
-    if (this._state === "playing") return t(this._lang, "live");
-    if (this._state === "loading") return t(this._lang, "starting");
+    if (this._started) return t(this._lang, "live");
+    if (this._state === "playing" || this._state === "loading") {
+      return t(this._lang, "starting");
+    }
     if (this._message) return this._message;
-    const d = this._findDevice();
-    if (d?.battery) return t(this._lang, "idle");
     return t(this._lang, "idle");
   }
 
@@ -549,8 +558,28 @@ class EzvizVideoCard extends HTMLElement {
         return;
       }
     }
-    video.play().catch(() => {});
 
+    // The first frame can take a while on a battery camera; only then does the
+    // max_seconds countdown start, so a short limit never cuts off the wake-up.
+    const onStarted = () => this._onStarted(gen, lang);
+    video.addEventListener("playing", onStarted);
+    video.addEventListener("loadeddata", onStarted);
+    video.play().catch(() => {});
+    this._startupTimer = setTimeout(() => {
+      if (gen !== this._gen || this._started) return;
+      this._fail(t(lang, "no_start"));
+    }, STARTUP_SECONDS * 1000);
+  }
+
+  _onStarted(gen, lang) {
+    if (gen !== this._gen || this._started) return;
+    this._started = true;
+    clearTimeout(this._startupTimer);
+    this._startupTimer = null;
+    if (this._header) {
+      this._header.dot.classList.add("on");
+      this._header.status.textContent = t(lang, "live");
+    }
     const max = Number(this._config.max_seconds) || 0;
     if (max > 0) {
       this._timer = setTimeout(
@@ -571,6 +600,9 @@ class EzvizVideoCard extends HTMLElement {
     this._gen += 1; // abandon any open that is still in flight
     clearTimeout(this._timer);
     this._timer = null;
+    clearTimeout(this._startupTimer);
+    this._startupTimer = null;
+    this._started = false;
     this._hls?.destroy();
     this._hls = null;
     if (this._video) {
