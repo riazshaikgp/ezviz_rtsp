@@ -1,6 +1,6 @@
 {
   "domain": "ezviz",
-  "name": "EZVIZ",
+  "name": "Ezviz Cloud with Video",
   "version": "1.0.0",
   "codeowners": ["@RenierM26"],
   "config_flow": true,

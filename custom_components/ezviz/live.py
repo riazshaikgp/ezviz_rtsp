@@ -79,12 +79,15 @@ class LiveStream:
         code: Callable[[], str | None],
         token: str | None = None,
         transcode: bool = False,
+        encrypted: bool = False,
     ) -> None:
         self._hass = hass
         self._coordinator = coordinator
         self.serial = serial
         self.channel = channel
         self._code = code
+        # A verification code only means something when the camera encrypts video.
+        self.encrypted = encrypted
         self._readers: set[asyncio.Queue[_Item]] = set()
         self._task: asyncio.Task[None] | None = None
         self._linger: asyncio.TimerHandle | None = None
@@ -103,6 +106,10 @@ class LiveStream:
     def active(self) -> bool:
         """Whether the stream is open (or opening)."""
         return self._task is not None
+
+    def current_code(self) -> str | None:
+        """The verification code to decrypt this camera's video, if any."""
+        return self._code() if self.encrypted else None
 
     async def frames(self) -> AsyncGenerator[bytes]:
         """MPEG-PS from the next group of pictures on, for as long as it is read.
@@ -171,10 +178,14 @@ class LiveStream:
         """Play the VTM stream and hand each pack to every reader."""
         self._video = closed = False
         end: _Item = None
+        started = False
         try:
             client = self._coordinator.ezviz_client
+            _LOGGER.debug("Opening the EZVIZ cloud stream of %s", self.serial)
             source = LiveSource(client, self.serial, self.channel)
-            code = self._code()
+            # A stored code only decrypts video of an encrypted camera; applying it
+            # to a clear stream would garble it.
+            code = self._code() if self.encrypted else None
             # The stream opens with a group of pictures that doesn't decode; with a
             # code, decrypting it garbles it further. Readers start at the next one.
             packs = PackSplitter(skip_first_group=bool(code))
@@ -193,8 +204,16 @@ class LiveStream:
                 for pack, keyframe in batch:
                     self._broadcast((pack, keyframe))
                     self._video = self._video or keyframe
+                    if keyframe and not started:
+                        started = True
+                        _LOGGER.info(
+                            "Live view of %s is streaming (%s%s)",
+                            self.serial,
+                            self.codec,
+                            ", decrypted" if code else "",
+                        )
         except EzvizStreamError as err:
-            _LOGGER.debug("Live stream of %s failed: %s", self.serial, err)
+            _LOGGER.warning("Live stream of %s failed: %s", self.serial, err)
             end = err
         except asyncio.CancelledError:
             closed = True  # on purpose; a linger stop without video already cooled down
@@ -272,6 +291,7 @@ class LiveStreamView(HomeAssistantView):
             try:
                 first = await anext(frames)
             except (EzvizStreamError, StopAsyncIteration) as err:
+                _LOGGER.warning("Live view of %s could not start: %s", serial, err)
                 raise web.HTTPServiceUnavailable from err
             if stream.transcode:
                 codec = (
@@ -380,8 +400,10 @@ def async_setup_live_streams(
         hass.config_entries.async_update_entry(
             entry, options={**options, CONF_STREAM_TOKEN: token}
         )
-    transcode = bool(entry.options.get(CONF_TRANSCODE, False))
-    for serial in coordinator.data:
+    # Transcode by default: the cloud stream is HEVC, which most browsers can't
+    # play, and the whole point of this fork is to make battery cameras visible.
+    transcode = bool(entry.options.get(CONF_TRANSCODE, True))
+    for serial, value in coordinator.data.items():
         def _code(serial: str = serial) -> str | None:
             return entry.options.get(CONF_CODES, {}).get(serial)
 
@@ -393,6 +415,7 @@ def async_setup_live_streams(
             _code,
             token=token,
             transcode=transcode,
+            encrypted=bool(value.get("encrypted")),
         )
 
 

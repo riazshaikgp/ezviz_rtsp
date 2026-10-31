@@ -4,7 +4,9 @@ import logging
 from typing import override
 
 from pyezvizapi.exceptions import HTTPError, InvalidHost, PyEzvizError
+from pyezvizapi.utils import decrypt_image
 
+import aiohttp
 from homeassistant.components import ffmpeg
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.components.ffmpeg import get_ffmpeg_manager
@@ -13,6 +15,7 @@ from homeassistant.config_entries import SOURCE_IGNORE, SOURCE_INTEGRATION_DISCO
 from homeassistant.const import CONF_IP_ADDRESS, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import discovery_flow
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import (
     AddConfigEntryEntitiesCallback,
     async_get_current_platform,
@@ -221,18 +224,40 @@ class EzvizCamera(EzvizEntity, Camera):
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
-        """Return a frame from the camera stream.
+        """Return a frame for the dashboard.
 
-        A cloud camera is never woken for a thumbnail: returning None keeps a
-        dashboard from draining a battery camera just by drawing it.
+        A cloud camera is never woken for a thumbnail: the last alarm picture is
+        shown instead, so drawing the camera on a dashboard costs no battery.
         """
         if self._use_cloud:
-            return None
+            return await self._async_cloud_still()
         if self._rtsp_stream is None:
             return None
         return await ffmpeg.async_get_image(
             self.hass, self._rtsp_stream, width=width, height=height
         )
+
+    async def _async_cloud_still(self) -> bytes | None:
+        """The camera's last alarm picture, decrypted if the camera encrypts it."""
+        url = self.data.get("last_alarm_pic")
+        if not isinstance(url, str) or not url:
+            return None
+        try:
+            session = async_get_clientsession(self.hass)
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    return None
+                content = await resp.read()
+        except aiohttp.ClientError as err:
+            _LOGGER.debug("No alarm picture for %s: %s", self._serial, err)
+            return None
+        if self.data.get("encrypted") and self._live is not None:
+            if (code := self._live.current_code()) is not None:
+                try:
+                    content = decrypt_image(content, code)
+                except PyEzvizError as err:
+                    _LOGGER.debug("Could not decrypt the alarm picture of %s: %s", self._serial, err)
+        return content
 
     @override
     async def stream_source(self) -> str | None:

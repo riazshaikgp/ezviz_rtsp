@@ -70,6 +70,8 @@ def _coordinator() -> MagicMock:
             "mac_address": None,
             "device_sub_category": "DP2",
             "version": "1.0",
+            "last_alarm_pic": None,
+            "encrypted": False,
         }
     }
     coordinator.live_streams = {}
@@ -78,7 +80,9 @@ def _coordinator() -> MagicMock:
 
 
 def _stream(code: str | None = None) -> LiveStream:
-    return LiveStream(_hass(), _coordinator(), "BK1", 1, lambda: code)
+    return LiveStream(
+        _hass(), _coordinator(), "BK1", 1, lambda: code, encrypted=bool(code)
+    )
 
 
 class _Upstream:
@@ -192,6 +196,22 @@ async def test_close_stops_the_stream(upstream) -> None:
     with pytest.raises(StopAsyncIteration):
         await pending
     assert not stream.active
+
+
+async def test_stored_code_is_ignored_for_a_clear_camera(upstream) -> None:
+    # A code on a camera that doesn't encrypt video must not be applied.
+    stream = LiveStream(
+        _hass(), _coordinator(), "BK1", 1, lambda: "SECRET", encrypted=False
+    )
+    with patch.object(live, "decrypt_packs") as decrypt:
+        frames = stream.frames()
+        pending = asyncio.ensure_future(anext(frames))
+        await asyncio.sleep(0)
+        upstream.queue.put_nowait(IMKH + KEY + PACK)
+        assert await pending == KEY
+        await frames.aclose()
+    decrypt.assert_not_called()
+    await stream.async_close()
 
 
 # --- LiveStreamView -----------------------------------------------------------
@@ -370,6 +390,45 @@ def test_battery_camera_is_detected() -> None:
     assert _is_battery_camera({"battery_level": 52})
     assert _is_battery_camera({"battery_camera_work_mode": 5})
     assert not _is_battery_camera({"local_ip": "1.2.3.4"})
+
+
+def _cloud_camera(coordinator, hass) -> object:
+    from custom_components.ezviz.camera import EzvizCamera
+
+    with patch("custom_components.ezviz.camera.get_ffmpeg_manager"):
+        camera = EzvizCamera(
+            hass, coordinator, "BK1", "admin", None, "", 554, "/x", use_cloud=True
+        )
+    camera.hass = hass
+    return camera
+
+
+async def test_cloud_still_is_none_without_an_alarm_picture() -> None:
+    hass = MagicMock()
+    coordinator = _coordinator()
+    coordinator.live_streams = {"BK1": LiveStream(hass, coordinator, "BK1", 1, lambda: None)}
+    camera = _cloud_camera(coordinator, hass)
+    assert await camera._async_cloud_still() is None
+
+
+async def test_cloud_still_fetches_the_alarm_picture() -> None:
+    hass = MagicMock()
+    coordinator = _coordinator()
+    coordinator.data["BK1"]["last_alarm_pic"] = "https://ezviz/pic"
+    coordinator.live_streams = {"BK1": LiveStream(hass, coordinator, "BK1", 1, lambda: None)}
+    camera = _cloud_camera(coordinator, hass)
+
+    response = MagicMock(status=200)
+    response.read = AsyncMock(return_value=b"\xff\xd8pic")
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=response)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.get = MagicMock(return_value=ctx)
+    with patch(
+        "custom_components.ezviz.camera.async_get_clientsession", return_value=session
+    ):
+        assert await camera._async_cloud_still() == b"\xff\xd8pic"
 
 
 # --- options flow -------------------------------------------------------------

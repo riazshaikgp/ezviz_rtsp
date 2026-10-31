@@ -584,7 +584,7 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
             data_schema=probatio.Schema(
                 {
                     probatio.Optional(
-                        CONF_TRANSCODE, default=options.get(CONF_TRANSCODE, False)
+                        CONF_TRANSCODE, default=options.get(CONF_TRANSCODE, True)
                     ): BooleanSelector()
                 }
             ),

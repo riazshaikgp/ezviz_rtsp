@@ -1,4 +1,4 @@
-# EZVIZ (account + cloud live view) for Home Assistant
+# Ezviz Cloud with Video for Home Assistant
 
 A local fork of Home Assistant's built-in **EZVIZ** integration
 ([`homeassistant/components/ezviz`](https://github.com/home-assistant/core/tree/dev/homeassistant/components/ezviz))
@@ -21,9 +21,12 @@ it as the camera entity's stream that any card, notification or bridge can play.
 - **Verification codes per camera** (`Configure → Verification codes`) for
   cameras with video encryption on. The code decrypts the stream inside Home
   Assistant and never reaches a browser.
-- **Optional transcoding** (`Configure → Video transcoding`): re-encode the
-  cloud HEVC stream to H.264 for browsers that can't play H.265. Off by default,
-  so live view costs almost no CPU unless a browser needs it.
+- **Optional transcoding**, **on by default** (`Configure → Video transcoding`):
+  re-encode the cloud HEVC stream to H.264 so it plays in every browser. It uses
+  the Home Assistant host's CPU only while someone watches; turn it off if your
+  browser or phone already plays H.265.
+- **A still on the dashboard without waking the camera**: a cloud camera's
+  thumbnail is its last alarm picture, so drawing it costs no battery.
 - **MFA support** at setup and reauthentication: when your EZVIZ account has
   two-step verification on, EZVIZ sends a code by e-mail or SMS and the flow
   asks for it, instead of telling you to disable 2FA.
@@ -60,8 +63,9 @@ delete the folder and restart.
    the e-mail/phone and password you use in the EZVIZ app and pick your region
    (`Europe`, `Russia`, or a custom URL).
 2. If EZVIZ sends a verification code, type it in the next step.
-3. Battery cameras show up as a camera entity that plays the cloud stream. If the
-   picture stays black, turn on **Configure → Video transcoding**.
+3. Battery cameras show up as a camera entity. The dashboard shows their last
+   alarm picture; press it to open the live view (transcoding is on by default,
+   so it plays in any browser).
 
 ### Verification codes
 
