@@ -83,9 +83,11 @@ background, so a restart doesn't make you log in again.
 The integration serves its own Lovelace card, so there's no resource to add:
 just pick **EZVIZ Video** in the card picker or paste the YAML. It is styled
 after **Mushroom cards** — a rounded card, an icon tile, a status line and a
-soft play button over the picture — but it needs neither Mushroom nor any other
-frontend add-on. The card finds a camera by its serial and plays Home
-Assistant's own stream.
+small **play/stop chip in the bottom-right corner** of the picture — but it needs
+neither Mushroom nor any other frontend add-on. The card finds a camera by its
+serial (or `entity`) and plays the integration's **own fast picture stream**,
+falling back to Home Assistant's stream only for a camera the integration does
+not stream itself.
 
 ```yaml
 type: custom:ezviz-video-card
@@ -158,9 +160,10 @@ There's also a visual editor: the serial becomes a dropdown of your cameras.
 Everything below lives under **Configure** on the integration:
 
 - **Video transcoding** — *on by default.* EZVIZ sends H.265, which most
-  desktop browsers refuse to decode; this re-encodes the live picture to H.264
-  so it just plays. If your browser or phone already handles H.265, turn it off
-  to save CPU.
+  desktop browsers refuse to decode; this re-encodes Home Assistant's own stream
+  — and the MPEG-TS address other apps read — to H.264 so it just plays. If your
+  browser or phone already handles H.265, turn it off to save CPU. The bundled
+  card shows its own MJPEG and never needs this.
 - **Verification codes** — only matters for cameras with *video encryption*
   enabled. Type the six-letter code from the camera's label; it decrypts the
   stream inside Home Assistant and is never sent to a browser.
@@ -179,7 +182,8 @@ Everything below lives under **Configure** on the integration:
 
 ## Feeding other apps (Frigate, go2rtc, …)
 
-Every camera can be read as plain MPEG-TS from a local, token-guarded address:
+Once you allow it (see below), every camera can be read by other apps as plain
+MPEG-TS from a local, token-guarded address:
 
 ```
 http://<your-ha>:8123/api/ezviz_rtsp/live/<serial>?token=<stream token>
@@ -194,8 +198,9 @@ addresses. The bundled card keeps working either way, because it uses its own
 separate token. Reading an address wakes the camera, so treat it like a doorbell:
 switch it on for a moment, then let it close.
 
-The same token unlocks a **live MJPEG picture** (what the bundled card uses),
-handy for a plain `<img>` or a dashboard that wants a small low-latency view:
+The same address also serves a **live MJPEG picture** — the endpoint the bundled
+card reads with its own token — handy for a plain `<img>` or a dashboard that
+wants a small, low-latency view:
 
 ```
 http://<your-ha>:8123/api/ezviz_rtsp/mjpeg/<serial>?token=<stream token>
@@ -218,12 +223,9 @@ A quick sketch, for the curious:
                               LiveStream (one per camera, shared)
                                     │
                 ┌───────────────────┴────────────────────┐
-     LiveStreamView (MPEG-TS,           Home Assistant camera entity
-      token-guarded) ──► HA stream       (for any card / bridge /
-      worker ──► HLS (┌─ H.264)           mobile notification)
-                └────────────────────────┘
-                          │
-                  the Lovelace card / any camera card
+     LiveStreamView (MPEG-TS)                  LiveMjpegView (live JPEG)
+      ├─ HA stream worker ──► HLS (H.264)         └─ the bundled card / a <img>
+      └─ other apps (go2rtc, Frigate …)
 ```
 
 The whole stream is opened lazily — the first thing that asks for it starts it,
@@ -313,6 +315,6 @@ with no affiliation to or endorsement from EZVIZ.
 If this project saved you some time, you can buy me a coffee — it keeps the
 battery cameras streaming.
 
-[![Buy Me a Coffee at ko-fi.com](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/tarasifua)
+<p><a href="https://ko-fi.com/tarasifua"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Buy Me a Coffee at ko-fi.com" width="320" height="43"></a></p>
 
 [ko-fi.com/tarasifua](https://ko-fi.com/tarasifua)
