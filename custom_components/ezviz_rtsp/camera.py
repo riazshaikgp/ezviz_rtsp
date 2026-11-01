@@ -3,9 +3,6 @@
 import logging
 from typing import override
 
-from pyezvizapi.exceptions import HTTPError, InvalidHost, PyEzvizError
-from pyezvizapi.utils import decrypt_image
-
 import aiohttp
 from homeassistant.components import ffmpeg
 from homeassistant.components.camera import Camera, CameraEntityFeature
@@ -20,6 +17,8 @@ from homeassistant.helpers.entity_platform import (
     AddConfigEntryEntitiesCallback,
     async_get_current_platform,
 )
+from pyezvizapi.exceptions import HTTPError, InvalidHost, PyEzvizError
+from pyezvizapi.utils import decrypt_image
 
 from .const import (
     ATTR_SERIAL,
@@ -251,12 +250,15 @@ class EzvizCamera(EzvizEntity, Camera):
         except aiohttp.ClientError as err:
             _LOGGER.debug("No alarm picture for %s: %s", self._serial, err)
             return None
-        if self.data.get("encrypted") and self._live is not None:
-            if (code := self._live.current_code()) is not None:
-                try:
-                    content = decrypt_image(content, code)
-                except PyEzvizError as err:
-                    _LOGGER.debug("Could not decrypt the alarm picture of %s: %s", self._serial, err)
+        if (
+            self.data.get("encrypted")
+            and self._live is not None
+            and (code := self._live.current_code()) is not None
+        ):
+            try:
+                content = decrypt_image(content, code)
+            except PyEzvizError as err:
+                _LOGGER.debug("Could not decrypt the alarm picture of %s: %s", self._serial, err)
         return content
 
     @override

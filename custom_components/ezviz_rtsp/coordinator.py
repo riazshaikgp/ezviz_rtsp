@@ -1,10 +1,14 @@
 """Provides the ezviz DataUpdateCoordinator."""
 
 import asyncio
-from datetime import timedelta
 import logging
+from datetime import timedelta
 from typing import TYPE_CHECKING, override
 
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from pyezvizapi.client import EzvizClient
 from pyezvizapi.exceptions import (
     EzvizAuthTokenExpired,
@@ -13,11 +17,6 @@ from pyezvizapi.exceptions import (
     InvalidURL,
     PyEzvizError,
 )
-
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN
 

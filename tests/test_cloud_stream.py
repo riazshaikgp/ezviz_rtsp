@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -311,7 +312,15 @@ def _request(hass, token: str) -> MagicMock:
     return request
 
 
+def _allows(stream):
+    """Give a mocked stream the real token check (its attribute is auto-mocked)."""
+    if stream is not None:
+        stream.allows = types.MethodType(LiveStream.allows, stream)
+    return stream
+
+
 async def _serve(stream, token: str, proc=None):
+    _allows(stream)
     hass = MagicMock()
     written: list[bytes] = []
     response = MagicMock()
@@ -333,7 +342,7 @@ async def test_view_remuxes_the_stream_to_mpegts() -> None:
         yield b"next"
 
     proc = _Proc()
-    _, written, spawn = await _serve(MagicMock(token="tok", frames=frames, transcode=False), "tok", proc)
+    _, written, spawn = await _serve(MagicMock(token="tok", internal_token="tok", frames=frames, transcode=False), "tok", proc)
     assert written == [b"ts:key", b"ts:next"]
     args = spawn.await_args.args
     assert args[args.index("-c") + 1] == "copy"
@@ -342,6 +351,7 @@ async def test_view_remuxes_the_stream_to_mpegts() -> None:
 
 
 async def _serve_mjpeg(stream, token: str, proc=None):
+    _allows(stream)
     hass = MagicMock()
     written: list[bytes] = []
     response = MagicMock()
@@ -378,19 +388,21 @@ async def test_mjpeg_view_encodes_the_stream_to_jpeg() -> None:
 
 
 async def test_mjpeg_view_rejects_a_bad_token() -> None:
-    stream = MagicMock(
+    stream = _allows(MagicMock(
         token="tok", internal_token="int", external_enabled=True, frames=MagicMock()
-    )
-    with patch.object(live, "find_stream", return_value=stream):
-        with pytest.raises(live.web.HTTPNotFound):
-            await LiveMjpegView().get(_request(MagicMock(), "wrong"), "BK1")
+    ))
+    with (
+        patch.object(live, "find_stream", return_value=stream),
+        pytest.raises(live.web.HTTPNotFound),
+    ):
+        await LiveMjpegView().get(_request(MagicMock(), "wrong"), "BK1")
 
 
 async def test_view_transcodes_to_h264_when_asked() -> None:
     async def frames():
         yield b"key"
 
-    _, _, spawn = await _serve(MagicMock(token="tok", frames=frames, transcode=True), "tok")
+    _, _, spawn = await _serve(MagicMock(token="tok", internal_token="tok", frames=frames, transcode=True), "tok")
     args = spawn.await_args.args
     assert args[args.index("-c:v") + 1] == "libx264"
 
@@ -398,7 +410,7 @@ async def test_view_transcodes_to_h264_when_asked() -> None:
 async def test_view_hides_unknown_cameras_and_bad_tokens() -> None:
     from aiohttp import web
 
-    for stream, token in ((None, "tok"), (MagicMock(token="tok"), "wrong")):
+    for stream, token in ((None, "tok"), (MagicMock(token="pub", internal_token="int"), "wrong")):
         with pytest.raises(web.HTTPNotFound):
             await _serve(stream, token)
 
@@ -426,6 +438,9 @@ def test_setup_live_streams_registers_view_and_builds_a_stream_per_camera() -> N
     # A random token is persisted so other apps' addresses survive a restart.
     stored = hass.config_entries.async_update_entry.call_args.kwargs["options"]["stream_token"]
     assert {s.token for s in coordinator.live_streams.values()} == {stored}
+    # The card's own token is persisted too.
+    internal = hass.config_entries.async_update_entry.call_args.kwargs["options"]["internal_token"]
+    assert {s.internal_token for s in coordinator.live_streams.values()} == {internal}
     # A second entry registers no view again.
     hass.data[DOMAIN + "_live_view_registered"] = True
     hass.http.register_view.reset_mock()
@@ -437,7 +452,7 @@ def test_stream_source_uses_the_ha_port_and_token() -> None:
     hass = MagicMock()
     hass.config.api.use_ssl = False
     hass.config.api.port = 8123
-    stream = MagicMock(serial="BK1", token="tok")
+    stream = MagicMock(serial="BK1", internal_token="tok")
     assert stream_source(hass, stream) == (
         "http://127.0.0.1:8123/api/ezviz_rtsp/live/BK1?token=tok"
     )
@@ -449,10 +464,22 @@ def test_mjpeg_path_is_relative_and_token_guarded() -> None:
 
 
 async def test_live_view_blocked_when_other_apps_are_off() -> None:
-    stream = MagicMock(token="pub", external_enabled=False, frames=MagicMock())
-    with patch.object(live, "find_stream", return_value=stream):
-        with pytest.raises(live.web.HTTPNotFound):
-            await LiveStreamView().get(_request(MagicMock(), "pub"), "BK1")
+    async def frames():
+        yield b"key"
+
+    # The public token is refused...
+    stream = _allows(MagicMock(
+        token="pub", internal_token="int", external_enabled=False,
+        frames=frames, transcode=False,
+    ))
+    with (
+        patch.object(live, "find_stream", return_value=stream),
+        pytest.raises(live.web.HTTPNotFound),
+    ):
+        await LiveStreamView().get(_request(MagicMock(), "pub"), "BK1")
+    # ...but the integration's own token (HA's stream worker) still works.
+    _, written, _ = await _serve(stream, "int")
+    assert written == [b"ts:key"]
 
 
 async def test_mjpeg_view_keeps_the_card_token_when_other_apps_are_off() -> None:
@@ -465,9 +492,11 @@ async def test_mjpeg_view_keeps_the_card_token_when_other_apps_are_off() -> None
     _, written, _, _ = await _serve_mjpeg(stream, "int", _Proc())
     assert written == [b"ts:key"]
     # The public token is refused while other apps are turned off.
-    with patch.object(live, "find_stream", return_value=stream):
-        with pytest.raises(live.web.HTTPNotFound):
-            await LiveMjpegView().get(_request(MagicMock(), "pub"), "BK1")
+    with (
+        patch.object(live, "find_stream", return_value=stream),
+        pytest.raises(live.web.HTTPNotFound),
+    ):
+        await LiveMjpegView().get(_request(MagicMock(), "pub"), "BK1")
 
 
 async def test_close_live_streams_closes_everyone() -> None:
@@ -507,7 +536,7 @@ def test_camera_uses_the_cloud_stream_without_rtsp() -> None:
     camera.entity_id = "camera.door"
     assert asyncio.run(camera.stream_source()) == (
         "http://127.0.0.1:8123/api/ezviz_rtsp/live/BK1?token="
-        + coordinator.live_streams["BK1"].token
+        + coordinator.live_streams["BK1"].internal_token
     )
 
 

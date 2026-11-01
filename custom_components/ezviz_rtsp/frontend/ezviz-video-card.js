@@ -493,7 +493,7 @@ class EzvizVideoCard extends HTMLElement {
       media.appendChild(layer);
     }
 
-    if (this._state === "playing") {
+    if (this._state === "playing" && this._video) {
       media.appendChild(this._video); // re-attach the running element
       media.appendChild(this._stopChip());
     } else if (this._state === "loading") {
@@ -586,8 +586,8 @@ class EzvizVideoCard extends HTMLElement {
 
     const lang = this._lang;
     // The device list carries the serial -> entity map and the fast MJPEG
-    // address, so load it once when a serial is configured.
-    if (!this._devices && this._config.serial) {
+    // address; load it once so even an entity-configured card gets the fast path.
+    if (!this._devices) {
       await this._loadDevices();
       if (gen !== this._gen) return;
     }

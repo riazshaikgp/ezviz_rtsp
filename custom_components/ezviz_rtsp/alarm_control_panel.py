@@ -1,12 +1,9 @@
 """Support for Ezviz alarm."""
 
+import logging
 from dataclasses import dataclass
 from datetime import timedelta
-import logging
 from typing import override
-
-from pyezvizapi import PyEzvizError
-from pyezvizapi.constants import DefenseModeType
 
 from homeassistant.components.alarm_control_panel import (
     AlarmControlPanelEntity,
@@ -18,6 +15,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from pyezvizapi import PyEzvizError
+from pyezvizapi.constants import DefenseModeType
 
 from .const import DOMAIN, MANUFACTURER
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator

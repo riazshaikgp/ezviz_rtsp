@@ -4,15 +4,6 @@ import hashlib
 import logging
 from pathlib import Path
 
-from pyezvizapi.client import EzvizClient
-from pyezvizapi.exceptions import (
-    EzvizAuthTokenExpired,
-    EzvizAuthVerificationCode,
-    HTTPError,
-    InvalidURL,
-    PyEzvizError,
-)
-
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http.server import StaticPathConfig
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
@@ -21,6 +12,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as er
 from homeassistant.loader import async_get_integration
+from pyezvizapi.client import EzvizClient
+from pyezvizapi.exceptions import (
+    EzvizAuthTokenExpired,
+    EzvizAuthVerificationCode,
+    HTTPError,
+    InvalidURL,
+    PyEzvizError,
+)
 
 from .const import (
     ATTR_TYPE_CAMERA,

@@ -4,8 +4,6 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any, override
 
-from pyezvizapi import HTTPError, PyEzvizError, SupportExt
-
 from homeassistant.components.siren import (
     SirenEntity,
     SirenEntityDescription,
@@ -17,6 +15,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import event as evt
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
+from pyezvizapi import HTTPError, PyEzvizError, SupportExt
 
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
 from .entity import EzvizBaseEntity

@@ -2,9 +2,6 @@
 
 from typing import Any, override
 
-from pyezvizapi.constants import DeviceCatagories, DeviceSwitchType, SupportExt
-from pyezvizapi.exceptions import HTTPError, PyEzvizError
-
 from homeassistant.components.light import ATTR_BRIGHTNESS, ColorMode, LightEntity
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -13,6 +10,8 @@ from homeassistant.util.percentage import (
     percentage_to_ranged_value,
     ranged_value_to_percentage,
 )
+from pyezvizapi.constants import DeviceCatagories, DeviceSwitchType, SupportExt
+from pyezvizapi.exceptions import HTTPError, PyEzvizError
 
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
 from .entity import EzvizEntity
@@ -43,7 +42,7 @@ class EzvizLight(EzvizEntity, LightEntity):
 
     _attr_translation_key = "light"
     _attr_color_mode = ColorMode.BRIGHTNESS
-    _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
+    _attr_supported_color_modes = frozenset({ColorMode.BRIGHTNESS})
 
     def __init__(
         self,

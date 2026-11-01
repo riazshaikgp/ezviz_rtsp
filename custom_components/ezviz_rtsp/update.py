@@ -2,8 +2,6 @@
 
 from typing import Any, override
 
-from pyezvizapi import HTTPError, PyEzvizError
-
 from homeassistant.components.update import (
     UpdateDeviceClass,
     UpdateEntity,
@@ -13,6 +11,7 @@ from homeassistant.components.update import (
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from pyezvizapi import HTTPError, PyEzvizError
 
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
 from .entity import EzvizEntity

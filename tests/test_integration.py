@@ -7,7 +7,6 @@ from unittest.mock import patch
 import pytest
 from homeassistant.components.camera import CameraEntityFeature
 from homeassistant.const import CONF_TYPE, CONF_URL, Platform
-
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ezviz_rtsp.const import (
@@ -58,7 +57,7 @@ class _FakeClient:
 
 
 @pytest.fixture(autouse=True)
-def auto_enable_custom_integrations(enable_custom_integrations):  # noqa: ANN001
+def auto_enable_custom_integrations(enable_custom_integrations):
     yield
 
 
@@ -128,8 +127,8 @@ async def test_battery_camera_sets_up_and_offers_a_cloud_stream(hass) -> None:
     assert source is not None
     assert source.startswith("http://127.0.0.1:")
     assert f"/api/{DOMAIN}/live/BK1?token=" in source
-    # The stream source carries the same token the entry persisted.
-    assert entry.options["stream_token"] in source
+    # The stream source carries the integration's own token (never the public one).
+    assert entry.options["internal_token"] in source
 
     # The Lovelace card is served and registered for the frontend.
     assert hass.data[DATA_CARD] is True

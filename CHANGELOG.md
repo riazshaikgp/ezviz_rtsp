@@ -5,6 +5,12 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Turning the stream addresses for other apps **off** no longer breaks Home
+  Assistant's own camera stream: the integration reads the stream with its own
+  token, so the HLS path and the camera entity keep working while go2rtc,
+  Frigate and friends are blocked.
+
 ### Added
 - **Stream address for other apps** option (Configure → Stream address for other
   apps): lists each cloud camera's token-guarded MPEG-TS and MJPEG addresses,

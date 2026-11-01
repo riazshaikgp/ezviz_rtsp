@@ -141,6 +141,19 @@ class LiveStream:
         """Whether the stream is open (or opening)."""
         return self._task is not None
 
+    def allows(self, token: str) -> bool:
+        """Whether a request token may read this stream.
+
+        The integration's own token is always accepted (Home Assistant's stream
+        worker and the bundled card read the stream with it); the public token is
+        accepted only while other apps are allowed to read the addresses.
+        """
+        if not token:
+            return False
+        if hmac.compare_digest(token, self.internal_token):
+            return True
+        return self.external_enabled and hmac.compare_digest(token, self.token)
+
     def current_code(self) -> str | None:
         """The verification code to decrypt this camera's video, if any."""
         return self._code() if self.encrypted else None
@@ -397,11 +410,7 @@ class LiveStreamView(HomeAssistantView):
         """Stream MPEG-TS while the client stays connected."""
         hass = request.app[KEY_HASS]
         stream = find_stream(hass, serial)
-        if (
-            stream is None
-            or not stream.external_enabled
-            or not hmac.compare_digest(request.query.get("token", ""), stream.token)
-        ):
+        if stream is None or not stream.allows(request.query.get("token", "")):
             raise web.HTTPNotFound
         async with contextlib.aclosing(stream.frames()) as frames:
             try:
@@ -439,15 +448,7 @@ class LiveMjpegView(HomeAssistantView):
         """Stream multipart JPEG while the client stays connected."""
         hass = request.app[KEY_HASS]
         stream = find_stream(hass, serial)
-        if stream is None:
-            raise web.HTTPNotFound
-        sent = request.query.get("token", "")
-        # The card's own token always works; the public one only when other apps
-        # are allowed to read the addresses.
-        allowed = hmac.compare_digest(sent, stream.internal_token) or (
-            stream.external_enabled and hmac.compare_digest(sent, stream.token)
-        )
-        if not allowed:
+        if stream is None or not stream.allows(request.query.get("token", "")):
             raise web.HTTPNotFound
         async with contextlib.aclosing(stream.frames()) as frames:
             try:
@@ -479,13 +480,16 @@ def find_stream(hass: HomeAssistant, serial: str) -> LiveStream | None:
 def stream_source(hass: HomeAssistant, stream: LiveStream) -> str:
     """The local MPEG-TS address Home Assistant's stream worker reads.
 
+    Uses the integration's own token, so Home Assistant's camera stream keeps
+    working even when the public addresses are turned off for other apps.
+
     ponytail: loopback to HA's own port; behind HA's TLS, go2rtc and the stream
     worker must accept its certificate for 127.0.0.1.
     """
     api = hass.config.api
     scheme = "https" if api is not None and api.use_ssl else "http"
     port = api.port if api is not None else 8123
-    return f"{scheme}://127.0.0.1:{port}/api/{DOMAIN}/live/{stream.serial}?token={stream.token}"
+    return f"{scheme}://127.0.0.1:{port}/api/{DOMAIN}/live/{stream.serial}?token={stream.internal_token}"
 
 
 def mjpeg_path(stream: LiveStream) -> str:
