@@ -201,8 +201,12 @@
       },
       "general": {
         "data": {
-          "ffmpeg_arguments": "Arguments passed to FFmpeg for cameras",
+          "ffmpeg_arguments": "FFmpeg arguments (local-RTSP cameras)",
           "timeout": "Request timeout (seconds)"
+        },
+        "data_description": {
+          "ffmpeg_arguments": "The RTSP path appended to a camera's address when you add it with the local IP and RTSP password. The default is the EZVIZ/Hikvision sub-stream. Cameras that stream through the EZVIZ cloud — battery cameras and peepholes — ignore this.",
+          "timeout": "How long to wait for a reply from the EZVIZ cloud before giving up."
         },
         "title": "General"
       },
