@@ -586,9 +586,37 @@ async def test_options_menu_and_video_step() -> None:
     flow, _ = _options_flow({})
     menu = await flow.async_step_init()
     assert menu["type"] == "menu"
-    assert menu["menu_options"] == ["general", "stream", "release", "video", "codes"]
+    assert menu["menu_options"] == [
+        "general",
+        "stream",
+        "release",
+        "stream_address",
+        "video",
+        "codes",
+    ]
     result = await flow.async_step_video({"transcode": True})
     assert result["data"]["transcode"] is True
+
+
+async def test_options_stream_address_step_shows_addresses_and_rotates() -> None:
+    flow, entry = _options_flow({})
+    entry.options = {"stream_token": "tok123"}
+    flow.hass.config.internal_url = "http://ha.local:8123"
+    flow.hass.config.external_url = None
+    with patch("custom_components.ezviz_rtsp.config_flow.uses_cloud_stream", return_value=True):
+        result = await flow.async_step_stream_address()
+    assert result["type"] == "form"
+    addresses = result["description_placeholders"]["addresses"]
+    assert "/api/ezviz_rtsp/live/BK1?token=tok123" in addresses
+    assert "/api/ezviz_rtsp/mjpeg/BK1?token=tok123" in addresses
+
+    with patch("custom_components.ezviz_rtsp.config_flow.uses_cloud_stream", return_value=True):
+        rotated = await flow.async_step_stream_address({"rotate_token": True})
+    assert rotated["data"]["stream_token"] != "tok123"
+    # Not rotating keeps the token.
+    with patch("custom_components.ezviz_rtsp.config_flow.uses_cloud_stream", return_value=True):
+        kept = await flow.async_step_stream_address({"rotate_token": False})
+    assert kept["data"]["stream_token"] == "tok123"
 
 
 async def test_options_release_step_saves_the_linger() -> None:

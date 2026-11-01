@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 import logging
+import secrets
 from typing import TYPE_CHECKING, Any, override
 
 import probatio
@@ -58,6 +59,7 @@ from .const import (
     CONF_RFSESSION_ID,
     CONF_SERIAL,
     CONF_SESSION_ID,
+    CONF_STREAM_TOKEN,
     CONF_TRANSCODE,
     DEFAULT_CAMERA_USERNAME,
     DEFAULT_FFMPEG_ARGUMENTS,
@@ -68,6 +70,9 @@ from .const import (
 )
 from .coordinator import EzvizConfigEntry
 from .live import LINGER, MAX_SESSION, uses_cloud_stream
+
+# A form-only field: it is not stored, it just asks for a new token on save.
+CONF_ROTATE_TOKEN = "rotate_token"
 
 _LOGGER = logging.getLogger(__name__)
 DEFAULT_OPTIONS = {
@@ -484,7 +489,14 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
         """Show the options menu; each part saves on its own."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["general", "stream", "release", "video", "codes"],
+            menu_options=[
+                "general",
+                "stream",
+                "release",
+                "stream_address",
+                "video",
+                "codes",
+            ],
         )
 
     async def async_step_general(
@@ -648,6 +660,49 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
                     )
                 }
             ),
+        )
+
+    async def async_step_stream_address(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show the token-guarded addresses other apps can read, and let the
+        token be replaced.
+
+        go2rtc, Frigate and friends read each cloud camera from these addresses.
+        Reading one wakes the camera, so they are meant to be opened briefly.
+        """
+        options = self.config_entry.options
+        if user_input is not None:
+            data = dict(options)
+            if user_input.get(CONF_ROTATE_TOKEN):
+                data[CONF_STREAM_TOKEN] = secrets.token_urlsafe(24)
+            return self.async_create_entry(title="", data=data)
+
+        cameras = self._async_cloud_cameras()
+        if not cameras:
+            return self.async_abort(reason="no_cameras")
+        token = options.get(CONF_STREAM_TOKEN) or ""
+        base = (
+            self.hass.config.internal_url
+            or self.hass.config.external_url
+            or "http://homeassistant:8123"
+        ).rstrip("/")
+        lines: list[str] = []
+        for serial, name in cameras:
+            lines.append(f"{name} ({serial})")
+            lines.append(f"{base}/api/{DOMAIN}/live/{serial}?token={token}")
+            lines.append(f"{base}/api/{DOMAIN}/mjpeg/{serial}?token={token}")
+            lines.append("")
+        return self.async_show_form(
+            step_id="stream_address",
+            data_schema=probatio.Schema(
+                {
+                    probatio.Optional(
+                        CONF_ROTATE_TOKEN, default=False
+                    ): BooleanSelector()
+                }
+            ),
+            description_placeholders={"addresses": "\n".join(lines).strip()},
         )
 
     async def async_step_video(

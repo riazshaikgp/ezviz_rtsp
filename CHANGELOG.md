@@ -6,6 +6,9 @@ This project follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Stream address for other apps** option (Configure → Stream address for other
+  apps): lists each cloud camera's token-guarded MPEG-TS and MJPEG addresses, and
+  can hand out a **new token** (links shared before then stop working).
 - **Release the camera after** option (Configure → Release the camera after):
   how long the cloud stream is held open after the last viewer leaves, in seconds
   (default **10**; `0` releases the camera at once). A short hold keeps a quick

@@ -185,10 +185,11 @@ Every camera can be read as plain MPEG-TS from a local, token-guarded address:
 http://<your-ha>:8123/api/ezviz_rtsp/live/<serial>?token=<stream token>
 ```
 
-The token is generated once and kept across restarts, and you can rotate it in
-**Configure → Stream address for other apps**. Reading the address wakes the
-camera, so treat it like a doorbell: switch it on for a moment, then let it
-close.
+The token is generated once and kept across restarts. **Configure → Stream
+address for other apps** lists the exact addresses of every camera (both the
+MPEG-TS and the MJPEG one) and can give you a **new token**, after which links
+shared before stop working. Reading an address wakes the camera, so treat it like
+a doorbell: switch it on for a moment, then let it close.
 
 The same token unlocks a **live MJPEG picture** (what the bundled card uses),
 handy for a plain `<img>` or a dashboard that wants a small low-latency view:

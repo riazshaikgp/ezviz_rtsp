@@ -197,7 +197,8 @@
           "general": "General",
           "release": "Release the camera after",
           "stream": "Maximum stream duration",
-          "video": "Video transcoding"
+          "video": "Video transcoding",
+          "stream_address": "Stream address for other apps"
         }
       },
       "general": {
@@ -252,6 +253,16 @@
         },
         "description": "After the last viewer leaves, the cloud stream is held open for this long before the camera is released. A short hold keeps a second play from waking the camera again; 0 releases it immediately.",
         "title": "Release the camera after"
+      },
+      "stream_address": {
+        "title": "Stream address for other apps",
+        "description": "Other apps (go2rtc, Frigate, …) can read each cloud camera from these token-guarded addresses:\n\n```\n{addresses}\n```\n\nOpening an address wakes the camera, so switch it on for a moment rather than around the clock.",
+        "data": {
+          "rotate_token": "Give a new token"
+        },
+        "data_description": {
+          "rotate_token": "Replace the stream token. Addresses shared before will stop working; the new ones appear here the next time this screen opens."
+        }
       }
     }
   },
