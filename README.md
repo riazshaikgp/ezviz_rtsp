@@ -104,18 +104,19 @@ max_seconds: 60        # optional; stop the stream to protect the battery (0 = n
 | `auto_play` | `false` | Start a clip as soon as the card is on screen. Off (the default) shows the camera's last picture and waits for a tap, so opening a dashboard never wakes a battery camera. A clip stops as soon as the card leaves the screen. |
 | `max_seconds` | `60` | How long a clip runs before it is stopped automatically, counted **from the first frame** (a battery camera can take a while to wake). `0` never stops it on its own, but leaving the card still does. |
 
-By default the card does nothing until you tap: it shows the camera's **last
-alarm picture** with a play button over it. Tapping starts the live view, which
-runs for `max_seconds`; a **Stop** chip ends it early. When `max_seconds` runs
-out the card quietly returns to the last picture — tap the card again to watch
-another clip; nothing has to be reloaded.
+By default the card does nothing until you press play: it shows the camera's
+**last alarm picture** with a small Mushroom-style **play chip in the bottom-right
+corner**. Pressing it starts the live view, which runs for `max_seconds`; a **Stop**
+chip in the same corner ends it early. When `max_seconds` runs out the card
+quietly returns to the last picture — press play again to watch another clip;
+nothing has to be reloaded.
 
 **Leaving the card stops the stream.** Switching to another dashboard view,
 hiding the browser tab, or scrolling the card out of sight all stop it for good,
 so a battery camera is never left streaming behind another view; come back and
-you get the last picture with the play button (press play to watch again). With
-`auto_play: true` the card instead starts a clip by itself when it appears. An
-idle card never wakes the camera.
+you get the last picture with the play chip. With `auto_play: true` the card
+instead starts a clip by itself when it appears. An idle card never wakes the
+camera.
 
 A **battery camera's charge** is shown in the top-right corner, opposite the
 camera name, when the integration exposes it.

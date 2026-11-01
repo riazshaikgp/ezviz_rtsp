@@ -13,8 +13,8 @@
 // The card shows the camera's live picture from the integration's own stream:
 // its fast MJPEG path (an <img> that appears a few seconds after the camera
 // wakes) with Home Assistant's HLS as the fallback. It is styled after Mushroom
-// cards — rounded card, an icon tile, a media area with a soft play button — but
-// needs neither Mushroom nor any other frontend dependency.
+// cards — rounded card, an icon tile, and a small play/stop chip in the corner
+// of the picture — but needs neither Mushroom nor any other frontend dependency.
 //
 // To keep a battery camera asleep, the card stops the stream whenever it is not
 // on screen (another dashboard view, another browser tab, scrolled away) or
@@ -62,7 +62,7 @@ const loadHls = () => {
 
 const STRINGS = /* translations */ {
   "en": {
-    "play": "Watch live",
+    "play": "Watch",
     "stop": "Stop",
     "starting": "Waking the camera…",
     "loading": "Loading…",
@@ -79,7 +79,7 @@ const STRINGS = /* translations */ {
     "max_seconds": "Stop after (seconds, 0 = never)"
   },
   "uk": {
-    "play": "Дивитися наживо",
+    "play": "Дивитися",
     "stop": "Зупинити",
     "starting": "Прокидаємо камеру…",
     "loading": "Завантаження…",
@@ -169,26 +169,12 @@ const style = /* css */ `
     background-size: cover; background-position: center;
     background-color: #000;
   }
-  .cover {
-    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    border: 0; margin: 0; padding: 0; cursor: pointer; background: transparent;
-  }
-  .cover:disabled { cursor: default; }
-  .play {
-    width: 56px; height: 56px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    color: #fff; --mdc-icon-size: 30px;
-    background: color-mix(in srgb, #000 45%, transparent);
-    backdrop-filter: blur(4px);
-    transition: transform 120ms ease, background 120ms ease;
-  }
-  .cover:hover .play { transform: scale(1.06); background: color-mix(in srgb, #000 60%, transparent); }
 
   .message {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     text-align: center; padding: 0 14px; color: #eee; font-size: 13px;
     background: linear-gradient(0deg, rgba(0,0,0,.25), rgba(0,0,0,.25));
-    pointer-events: none; /* never block the play button underneath */
+    pointer-events: none; /* never block the controls underneath */
   }
 
   .chip {
@@ -199,7 +185,9 @@ const style = /* css */ `
     background: color-mix(in srgb, #000 55%, transparent); color: #fff;
     backdrop-filter: blur(4px);
   }
-  .chip.stop { right: 8px; bottom: 8px; }
+  .chip.play, .chip.stop { right: 8px; bottom: 8px; }
+  .chip.play { color: #fff; background: color-mix(in srgb, var(--primary-color) 85%, #000); }
+  .chip.play:hover { background: var(--primary-color); }
   .chip:hover { background: color-mix(in srgb, #000 70%, transparent); }
 
   .spinner {
@@ -515,17 +503,9 @@ class EzvizVideoCard extends HTMLElement {
       spinner.className = "spinner";
       media.appendChild(spinner);
     } else {
-      const cover = document.createElement("button");
-      cover.className = "cover";
-      cover.title = t(this._lang, this._message ? "play" : "play");
-      const play = document.createElement("div");
-      play.className = "play";
-      const playIcon = document.createElement("ha-icon");
-      playIcon.setAttribute("icon", "mdi:play");
-      play.appendChild(playIcon);
-      cover.appendChild(play);
-      cover.addEventListener("click", () => this._play());
-      media.appendChild(cover);
+      // A small Mushroom-style chip in the corner, not a big circle over the
+      // picture: the card stays a picture with one clear control.
+      media.appendChild(this._playChip());
       if (this._message) {
         const message = document.createElement("div");
         message.className = "message";
@@ -564,6 +544,23 @@ class EzvizVideoCard extends HTMLElement {
       this._stop(true);
     });
     return stop;
+  }
+
+  _playChip() {
+    const play = document.createElement("button");
+    play.className = "chip play";
+    play.title = t(this._lang, "play");
+    const icon = document.createElement("ha-icon");
+    icon.setAttribute("icon", "mdi:play");
+    icon.style.setProperty("--mdc-icon-size", "14px");
+    const label = document.createElement("span");
+    label.textContent = t(this._lang, "play");
+    play.append(icon, label);
+    play.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this._play();
+    });
+    return play;
   }
 
   // -- playback ------------------------------------------------------------
