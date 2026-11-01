@@ -256,11 +256,13 @@
       },
       "stream_address": {
         "title": "Stream address for other apps",
-        "description": "Other apps (go2rtc, Frigate, …) can read each cloud camera from these token-guarded addresses:\n\n```\n{addresses}\n```\n\nOpening an address wakes the camera, so switch it on for a moment rather than around the clock.",
+        "description": "Other apps (go2rtc, Frigate, …) can read each cloud camera from these token-guarded addresses:\n\n```\n{addresses}\n```\n\nOpening an address wakes the camera, so switch it on for a moment rather than around the clock. The bundled card keeps working even when these are off.",
         "data": {
+          "stream_enabled": "Allow other apps to read the stream",
           "rotate_token": "Give a new token"
         },
         "data_description": {
+          "stream_enabled": "Turn off to block these addresses for other apps. The bundled card keeps working either way.",
           "rotate_token": "Replace the stream token. Addresses shared before will stop working; the new ones appear here the next time this screen opens."
         }
       }

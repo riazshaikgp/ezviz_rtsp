@@ -112,6 +112,10 @@ async def test_battery_camera_sets_up_and_offers_a_cloud_stream(hass) -> None:
     assert entry.runtime_data.live_streams["BK1"]._max_session == 30
     # The release delay comes from the options ("Release the camera after").
     assert entry.runtime_data.live_streams["BK1"]._linger_seconds == 5
+    # Other apps may read the public addresses by default, and the card has its
+    # own token so turning that off does not break it.
+    assert entry.runtime_data.live_streams["BK1"].external_enabled is True
+    assert entry.options["internal_token"]
     assert hass.data[DATA_LIVE_VIEW] is True
 
     # A battery camera must not trigger the RTSP discovery flow.

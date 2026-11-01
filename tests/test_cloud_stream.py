@@ -364,7 +364,9 @@ async def test_mjpeg_view_encodes_the_stream_to_jpeg() -> None:
 
     proc = _Proc()
     _, written, spawn, response = await _serve_mjpeg(
-        MagicMock(token="tok", frames=frames), "tok", proc
+        MagicMock(token="tok", internal_token="tok", external_enabled=True, frames=frames),
+        "tok",
+        proc,
     )
     assert written == [b"ts:key", b"ts:next"]
     args = spawn.await_args.args
@@ -376,7 +378,9 @@ async def test_mjpeg_view_encodes_the_stream_to_jpeg() -> None:
 
 
 async def test_mjpeg_view_rejects_a_bad_token() -> None:
-    stream = MagicMock(token="tok", frames=MagicMock())
+    stream = MagicMock(
+        token="tok", internal_token="int", external_enabled=True, frames=MagicMock()
+    )
     with patch.object(live, "find_stream", return_value=stream):
         with pytest.raises(live.web.HTTPNotFound):
             await LiveMjpegView().get(_request(MagicMock(), "wrong"), "BK1")
@@ -440,8 +444,30 @@ def test_stream_source_uses_the_ha_port_and_token() -> None:
 
 
 def test_mjpeg_path_is_relative_and_token_guarded() -> None:
-    stream = MagicMock(serial="BK1", token="tok")
-    assert mjpeg_path(stream) == "/api/ezviz_rtsp/mjpeg/BK1?token=tok"
+    stream = MagicMock(serial="BK1", internal_token="int")
+    assert mjpeg_path(stream) == "/api/ezviz_rtsp/mjpeg/BK1?token=int"
+
+
+async def test_live_view_blocked_when_other_apps_are_off() -> None:
+    stream = MagicMock(token="pub", external_enabled=False, frames=MagicMock())
+    with patch.object(live, "find_stream", return_value=stream):
+        with pytest.raises(live.web.HTTPNotFound):
+            await LiveStreamView().get(_request(MagicMock(), "pub"), "BK1")
+
+
+async def test_mjpeg_view_keeps_the_card_token_when_other_apps_are_off() -> None:
+    async def frames():
+        yield b"key"
+
+    stream = MagicMock(
+        token="pub", internal_token="int", external_enabled=False, frames=frames
+    )
+    _, written, _, _ = await _serve_mjpeg(stream, "int", _Proc())
+    assert written == [b"ts:key"]
+    # The public token is refused while other apps are turned off.
+    with patch.object(live, "find_stream", return_value=stream):
+        with pytest.raises(live.web.HTTPNotFound):
+            await LiveMjpegView().get(_request(MagicMock(), "pub"), "BK1")
 
 
 async def test_close_live_streams_closes_everyone() -> None:
@@ -617,6 +643,17 @@ async def test_options_stream_address_step_shows_addresses_and_rotates() -> None
     with patch("custom_components.ezviz_rtsp.config_flow.uses_cloud_stream", return_value=True):
         kept = await flow.async_step_stream_address({"rotate_token": False})
     assert kept["data"]["stream_token"] == "tok123"
+
+
+async def test_options_stream_address_step_toggles_external_access() -> None:
+    flow, entry = _options_flow({})
+    entry.options = {"stream_token": "tok123", "stream_enabled": True}
+    with patch("custom_components.ezviz_rtsp.config_flow.uses_cloud_stream", return_value=True):
+        off = await flow.async_step_stream_address({"stream_enabled": False})
+    assert off["data"]["stream_enabled"] is False
+    with patch("custom_components.ezviz_rtsp.config_flow.uses_cloud_stream", return_value=True):
+        on = await flow.async_step_stream_address({"stream_enabled": True})
+    assert on["data"]["stream_enabled"] is True
 
 
 async def test_options_release_step_saves_the_linger() -> None:

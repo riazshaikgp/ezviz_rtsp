@@ -16,7 +16,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
-from .const import CONF_CODES, CONF_STREAM_TOKEN, DATA_WS, DOMAIN
+from .const import CONF_CODES, CONF_INTERNAL_TOKEN, DATA_WS, DOMAIN
 
 
 @callback
@@ -56,7 +56,7 @@ async def ws_get_devices(
     devices: list[dict[str, Any]] = []
     for entry in _loaded_entries(hass):
         codes = entry.options.get(CONF_CODES, {})
-        token = entry.options.get(CONF_STREAM_TOKEN)
+        token = entry.options.get(CONF_INTERNAL_TOKEN)
         data = getattr(getattr(entry, "runtime_data", None), "data", None) or {}
         for serial, value in data.items():
             devices.append(

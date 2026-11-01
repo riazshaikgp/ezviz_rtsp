@@ -35,8 +35,10 @@ from .cloud_stream import (
 )
 from .const import (
     CONF_CODES,
+    CONF_INTERNAL_TOKEN,
     CONF_LINGER,
     CONF_MAX_SESSION,
+    CONF_STREAM_ENABLED,
     CONF_STREAM_TOKEN,
     CONF_TRANSCODE,
     DATA_LIVE_VIEW,
@@ -92,6 +94,8 @@ class LiveStream:
         channel: int,
         code: Callable[[], str | None],
         token: str | None = None,
+        internal_token: str | None = None,
+        external_enabled: bool = True,
         transcode: bool = False,
         encrypted: bool = False,
         battery: bool = False,
@@ -126,6 +130,11 @@ class LiveStream:
         self.transcode = transcode
         # Guards the HTTP view, which go2rtc reads without Home Assistant credentials.
         self.token = token or secrets.token_urlsafe(24)
+        # The card's own picture address, so turning the public addresses off does
+        # not break the bundled card.
+        self.internal_token = internal_token or secrets.token_urlsafe(24)
+        # Whether other apps may read the public addresses at all.
+        self.external_enabled = external_enabled
 
     @property
     def active(self) -> bool:
@@ -388,7 +397,11 @@ class LiveStreamView(HomeAssistantView):
         """Stream MPEG-TS while the client stays connected."""
         hass = request.app[KEY_HASS]
         stream = find_stream(hass, serial)
-        if stream is None or not hmac.compare_digest(request.query.get("token", ""), stream.token):
+        if (
+            stream is None
+            or not stream.external_enabled
+            or not hmac.compare_digest(request.query.get("token", ""), stream.token)
+        ):
             raise web.HTTPNotFound
         async with contextlib.aclosing(stream.frames()) as frames:
             try:
@@ -426,7 +439,15 @@ class LiveMjpegView(HomeAssistantView):
         """Stream multipart JPEG while the client stays connected."""
         hass = request.app[KEY_HASS]
         stream = find_stream(hass, serial)
-        if stream is None or not hmac.compare_digest(request.query.get("token", ""), stream.token):
+        if stream is None:
+            raise web.HTTPNotFound
+        sent = request.query.get("token", "")
+        # The card's own token always works; the public one only when other apps
+        # are allowed to read the addresses.
+        allowed = hmac.compare_digest(sent, stream.internal_token) or (
+            stream.external_enabled and hmac.compare_digest(sent, stream.token)
+        )
+        if not allowed:
             raise web.HTTPNotFound
         async with contextlib.aclosing(stream.frames()) as frames:
             try:
@@ -468,8 +489,8 @@ def stream_source(hass: HomeAssistant, stream: LiveStream) -> str:
 
 
 def mjpeg_path(stream: LiveStream) -> str:
-    """The MJPEG address a browser can put in an <img>, relative to HA's origin."""
-    return f"/api/{DOMAIN}/mjpeg/{stream.serial}?token={stream.token}"
+    """The card's picture address, relative to HA's origin (its own token)."""
+    return f"/api/{DOMAIN}/mjpeg/{stream.serial}?token={stream.internal_token}"
 
 
 def uses_cloud_stream(hass: HomeAssistant, serial: str) -> bool:
@@ -498,12 +519,27 @@ def async_setup_live_streams(
 
     options = dict(entry.options)
     token = options.get(CONF_STREAM_TOKEN)
+    internal_token = options.get(CONF_INTERNAL_TOKEN)
+    changed = False
     if not token:
         # Persist a random token so the addresses other apps hold survive a restart.
         token = secrets.token_urlsafe(24)
+        changed = True
+    if not internal_token:
+        # A separate token for the card's own picture address.
+        internal_token = secrets.token_urlsafe(24)
+        changed = True
+    if changed:
         hass.config_entries.async_update_entry(
-            entry, options={**options, CONF_STREAM_TOKEN: token}
+            entry,
+            options={
+                **options,
+                CONF_STREAM_TOKEN: token,
+                CONF_INTERNAL_TOKEN: internal_token,
+            },
         )
+    # Whether other apps may read the public addresses at all (the card always can).
+    stream_enabled = bool(entry.options.get(CONF_STREAM_ENABLED, True))
     # Transcode by default: the cloud stream is HEVC, which most browsers can't
     # play, and the whole point of this fork is to make battery cameras visible.
     transcode = bool(entry.options.get(CONF_TRANSCODE, True))
@@ -529,6 +565,8 @@ def async_setup_live_streams(
             1,
             _code,
             token=token,
+            internal_token=internal_token,
+            external_enabled=stream_enabled,
             transcode=transcode,
             encrypted=bool(value.get("encrypted")),
             battery=battery,

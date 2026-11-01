@@ -59,6 +59,7 @@ from .const import (
     CONF_RFSESSION_ID,
     CONF_SERIAL,
     CONF_SESSION_ID,
+    CONF_STREAM_ENABLED,
     CONF_STREAM_TOKEN,
     CONF_TRANSCODE,
     DEFAULT_CAMERA_USERNAME,
@@ -674,6 +675,7 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
         options = self.config_entry.options
         if user_input is not None:
             data = dict(options)
+            data[CONF_STREAM_ENABLED] = bool(user_input.get(CONF_STREAM_ENABLED, True))
             if user_input.get(CONF_ROTATE_TOKEN):
                 data[CONF_STREAM_TOKEN] = secrets.token_urlsafe(24)
             return self.async_create_entry(title="", data=data)
@@ -682,6 +684,7 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
         if not cameras:
             return self.async_abort(reason="no_cameras")
         token = options.get(CONF_STREAM_TOKEN) or ""
+        enabled = bool(options.get(CONF_STREAM_ENABLED, True))
         base = (
             self.hass.config.internal_url
             or self.hass.config.external_url
@@ -698,8 +701,11 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
             data_schema=probatio.Schema(
                 {
                     probatio.Optional(
+                        CONF_STREAM_ENABLED, default=enabled
+                    ): BooleanSelector(),
+                    probatio.Optional(
                         CONF_ROTATE_TOKEN, default=False
-                    ): BooleanSelector()
+                    ): BooleanSelector(),
                 }
             ),
             description_placeholders={"addresses": "\n".join(lines).strip()},
