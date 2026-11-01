@@ -675,7 +675,7 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
         options = self.config_entry.options
         if user_input is not None:
             data = dict(options)
-            data[CONF_STREAM_ENABLED] = bool(user_input.get(CONF_STREAM_ENABLED, True))
+            data[CONF_STREAM_ENABLED] = bool(user_input.get(CONF_STREAM_ENABLED, False))
             if user_input.get(CONF_ROTATE_TOKEN):
                 data[CONF_STREAM_TOKEN] = secrets.token_urlsafe(24)
             return self.async_create_entry(title="", data=data)
@@ -684,7 +684,7 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
         if not cameras:
             return self.async_abort(reason="no_cameras")
         token = options.get(CONF_STREAM_TOKEN) or ""
-        enabled = bool(options.get(CONF_STREAM_ENABLED, True))
+        enabled = bool(options.get(CONF_STREAM_ENABLED, False))
         base = (
             self.hass.config.internal_url
             or self.hass.config.external_url

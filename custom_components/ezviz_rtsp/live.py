@@ -539,7 +539,8 @@ def async_setup_live_streams(
             },
         )
     # Whether other apps may read the public addresses at all (the card always can).
-    stream_enabled = bool(entry.options.get(CONF_STREAM_ENABLED, True))
+    # Off by default: the addresses are opt-in.
+    stream_enabled = bool(entry.options.get(CONF_STREAM_ENABLED, False))
     # Transcode by default: the cloud stream is HEVC, which most browsers can't
     # play, and the whole point of this fork is to make battery cameras visible.
     transcode = bool(entry.options.get(CONF_TRANSCODE, True))

@@ -189,9 +189,10 @@ The token is generated once and kept across restarts. **Configure → Stream
 address for other apps** lists the exact addresses of every camera (both the
 MPEG-TS and the MJPEG one), can hand out a **new token** (links shared before
 then stop working), and has an **Allow other apps to read the stream** switch —
-turn it off to block these addresses entirely; the bundled card keeps working
-because it uses its own separate token. Reading an address wakes the camera, so
-treat it like a doorbell: switch it on for a moment, then let it close.
+**off by default**: turn it on to let go2rtc, Frigate and friends read these
+addresses. The bundled card keeps working either way, because it uses its own
+separate token. Reading an address wakes the camera, so treat it like a doorbell:
+switch it on for a moment, then let it close.
 
 The same token unlocks a **live MJPEG picture** (what the bundled card uses),
 handy for a plain `<img>` or a dashboard that wants a small low-latency view:

@@ -9,8 +9,9 @@ This project follows [Semantic Versioning](https://semver.org/).
 - **Stream address for other apps** option (Configure → Stream address for other
   apps): lists each cloud camera's token-guarded MPEG-TS and MJPEG addresses,
   can hand out a **new token** (links shared before then stop working), and has
-  an **Allow other apps to read the stream** switch that blocks those addresses
-  entirely. The bundled card keeps working — it carries its own separate token.
+  an **Allow other apps to read the stream** switch — **off by default** — that
+  turns those addresses on. The bundled card keeps working either way: it carries
+  its own separate token.
 - **Release the camera after** option (Configure → Release the camera after):
   how long the cloud stream is held open after the last viewer leaves, in seconds
   (default **10**; `0` releases the camera at once). A short hold keeps a quick

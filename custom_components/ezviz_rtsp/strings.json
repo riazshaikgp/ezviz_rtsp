@@ -262,7 +262,7 @@
           "rotate_token": "Give a new token"
         },
         "data_description": {
-          "stream_enabled": "Turn off to block these addresses for other apps. The bundled card keeps working either way.",
+          "stream_enabled": "Off by default. Turn it on to let other apps (go2rtc, Frigate, …) read these addresses. The bundled card keeps working either way.",
           "rotate_token": "Replace the stream token. Addresses shared before will stop working; the new ones appear here the next time this screen opens."
         }
       }
