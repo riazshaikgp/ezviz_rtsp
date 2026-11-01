@@ -161,4 +161,5 @@ async def test_card_devices_websocket_lists_the_camera(hass, hass_ws_client) -> 
     assert device["battery"] is True
     assert device["battery_level"] == 52
     assert "battery_entity_id" in device
+    assert device["mjpeg_url"].startswith(f"/api/{DOMAIN}/mjpeg/BK1?token=")
     assert device["entity_id"]

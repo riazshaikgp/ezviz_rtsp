@@ -111,18 +111,20 @@ out the card quietly returns to the last picture — tap the card again to watch
 another clip; nothing has to be reloaded.
 
 **A running clip keeps running.** If you switch to another dashboard view (or
-another browser tab) while the picture is playing, the card only pauses the
-picture off screen — the stream and its countdown carry on, and it resumes when
-you come back, as long as `max_seconds` has not passed. With `auto_play: true`
-the card also starts a clip by itself when it first appears; with the default
-`false` it waits for a tap. An idle card never wakes the camera.
+another browser tab) while the picture is playing, the card keeps the stream and
+its countdown going, and the picture is still there when you come back, as long
+as `max_seconds` has not passed. With `auto_play: true` the card also starts a
+clip by itself when it first appears; with the default `false` it waits for a
+tap. An idle card never wakes the camera.
 
 A **battery camera's charge** is shown in the top-right corner, opposite the
 camera name, when the integration exposes it.
 
-The card shows the camera's **last picture straight away** while the stream
-wakes, so it never looks blank during the few seconds a battery camera needs to
-come online.
+The card shows the picture through the integration's **own fast picture stream**
+(a live MJPEG) so it appears a few seconds after the camera wakes, rather than
+waiting for Home Assistant's HLS to build segments. It falls back to HLS for a
+camera the integration does not stream itself. While the camera wakes, the card
+keeps its **last picture** on screen, so it never looks blank.
 
 The card waits up to 45 seconds for the camera to wake and send its first frame
 (a battery camera over the cloud relay is not instant); `max_seconds` only starts
@@ -181,6 +183,13 @@ The token is generated once and kept across restarts, and you can rotate it in
 **Configure → Stream address for other apps**. Reading the address wakes the
 camera, so treat it like a doorbell: switch it on for a moment, then let it
 close.
+
+The same token unlocks a **live MJPEG picture** (what the bundled card uses),
+handy for a plain `<img>` or a dashboard that wants a small low-latency view:
+
+```
+http://<your-ha>:8123/api/ezviz_rtsp/mjpeg/<serial>?token=<stream token>
+```
 
 ---
 

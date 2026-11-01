@@ -65,6 +65,13 @@ _STALL_MARGIN = 30
 _PHOTO_SECONDS = 1
 _PHOTO_BYTES = 700_000
 
+# The card's fast path: the cloud stream encoded straight to JPEG for a browser
+# <img>. Smaller and slower than the video, but it appears in a few seconds
+# instead of waiting for Home Assistant's stream worker to build HLS segments.
+_MJPEG_WIDTH = 1280
+_MJPEG_FPS = 8
+_MJPEG_QUALITY = 6
+
 type _Item = tuple[bytes, bool] | Exception | None
 
 
@@ -304,6 +311,61 @@ def ffmpeg_binary(hass: HomeAssistant) -> str:
     return get_ffmpeg_manager(hass).binary
 
 
+async def _pipe_frames(
+    hass: HomeAssistant,
+    request: web.Request,
+    frames: AsyncGenerator[bytes],
+    first: bytes,
+    ffmpeg_args: tuple[str, ...],
+    content_type: str,
+) -> web.StreamResponse:
+    """Feed MPEG-PS frames through ffmpeg and stream its output to the client."""
+    proc = await asyncio.create_subprocess_exec(
+        ffmpeg_binary(hass),
+        *("-hide_banner", "-loglevel", "error", "-fflags", "+genpts"),
+        # The parameter sets come with the first keyframe: don't wait 5 s to probe.
+        *("-analyzeduration", "1000000"),
+        *("-f", "mpeg", "-i", "pipe:0"),
+        *ffmpeg_args,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    assert proc.stdin is not None
+    assert proc.stdout is not None
+    stdin = proc.stdin
+
+    async def _feed() -> None:
+        try:
+            stdin.write(first)
+            async for data in frames:
+                stdin.write(data)
+                await stdin.drain()
+        except (EzvizStreamError, ConnectionError) as err:
+            _LOGGER.debug("Live stream ended: %s", err)
+        finally:
+            with contextlib.suppress(OSError):
+                stdin.close()
+
+    feeder = asyncio.create_task(_feed())
+    response = web.StreamResponse()
+    response.content_type = content_type
+    try:
+        await response.prepare(request)
+        while chunk := await proc.stdout.read(65536):
+            await response.write(chunk)
+    except ConnectionError:
+        pass  # the reader left
+    finally:
+        feeder.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await feeder
+        if proc.returncode is None:
+            proc.kill()
+        await proc.wait()
+    return response
+
+
 class LiveStreamView(HomeAssistantView):
     """Serves a camera's live stream as MPEG-TS to go2rtc and HA's stream worker.
 
@@ -336,51 +398,46 @@ class LiveStreamView(HomeAssistantView):
                 )
             else:
                 codec = ("-map", "0:v:0", "-c", "copy")
-            proc = await asyncio.create_subprocess_exec(
-                ffmpeg_binary(hass),
-                *("-hide_banner", "-loglevel", "error", "-fflags", "+genpts"),
-                # The parameter sets come with the first keyframe: don't wait 5 s to probe.
-                *("-analyzeduration", "1000000"),
-                *("-f", "mpeg", "-i", "pipe:0"),
-                *codec,
-                *("-f", "mpegts", "pipe:1"),
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
+            return await _pipe_frames(
+                hass, request, frames, first, (*codec, "-f", "mpegts", "pipe:1"), "video/mp2t"
             )
-            assert proc.stdin is not None
-            assert proc.stdout is not None
-            stdin = proc.stdin
 
-            async def _feed() -> None:
-                try:
-                    stdin.write(first)
-                    async for data in frames:
-                        stdin.write(data)
-                        await stdin.drain()
-                except (EzvizStreamError, ConnectionError) as err:
-                    _LOGGER.debug("Live stream of %s ended: %s", serial, err)
-                finally:
-                    with contextlib.suppress(OSError):
-                        stdin.close()
 
-            feeder = asyncio.create_task(_feed())
-            response = web.StreamResponse()
-            response.content_type = "video/mp2t"
+class LiveMjpegView(HomeAssistantView):
+    """Serves a camera's live picture as MJPEG, ready for a browser <img>.
+
+    Home Assistant's own camera view is HLS, which only shows its first frame
+    once the stream worker has built segments — a slow first start. This encodes
+    the cloud stream straight to JPEG, so the picture appears a few seconds after
+    the camera wakes, the same fast path the EZVIZ app uses.
+    """
+
+    url = f"/api/{DOMAIN}/mjpeg/{{serial}}"
+    name = f"api:{DOMAIN}:mjpeg"
+    requires_auth = False
+
+    async def get(self, request: web.Request, serial: str) -> web.StreamResponse:
+        """Stream multipart JPEG while the client stays connected."""
+        hass = request.app[KEY_HASS]
+        stream = find_stream(hass, serial)
+        if stream is None or not hmac.compare_digest(request.query.get("token", ""), stream.token):
+            raise web.HTTPNotFound
+        async with contextlib.aclosing(stream.frames()) as frames:
             try:
-                await response.prepare(request)
-                while chunk := await proc.stdout.read(65536):
-                    await response.write(chunk)
-            except ConnectionError:
-                pass  # the reader left
-            finally:
-                feeder.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await feeder
-                if proc.returncode is None:
-                    proc.kill()
-                await proc.wait()
-        return response
+                first = await anext(frames)
+            except (EzvizStreamError, StopAsyncIteration) as err:
+                _LOGGER.warning("Live view of %s could not start: %s", serial, err)
+                raise web.HTTPServiceUnavailable from err
+            args = (
+                "-map", "0:v:0", "-c:v", "mjpeg", "-q:v", str(_MJPEG_QUALITY),
+                "-vf", f"scale={_MJPEG_WIDTH}:-2", "-r", str(_MJPEG_FPS),
+                "-f", "mpjpeg", "pipe:1",
+            )
+            # ffmpeg's mpjpeg muxer writes its own '--ffmpeg' boundary.
+            return await _pipe_frames(
+                hass, request, frames, first, args,
+                "multipart/x-mixed-replace;boundary=ffmpeg",
+            )
 
 
 def find_stream(hass: HomeAssistant, serial: str) -> LiveStream | None:
@@ -402,6 +459,11 @@ def stream_source(hass: HomeAssistant, stream: LiveStream) -> str:
     scheme = "https" if api is not None and api.use_ssl else "http"
     port = api.port if api is not None else 8123
     return f"{scheme}://127.0.0.1:{port}/api/{DOMAIN}/live/{stream.serial}?token={stream.token}"
+
+
+def mjpeg_path(stream: LiveStream) -> str:
+    """The MJPEG address a browser can put in an <img>, relative to HA's origin."""
+    return f"/api/{DOMAIN}/mjpeg/{stream.serial}?token={stream.token}"
 
 
 def uses_cloud_stream(hass: HomeAssistant, serial: str) -> bool:
@@ -426,6 +488,7 @@ def async_setup_live_streams(
     if not hass.data.get(DATA_LIVE_VIEW):
         hass.data[DATA_LIVE_VIEW] = True
         hass.http.register_view(LiveStreamView())
+        hass.http.register_view(LiveMjpegView())
 
     options = dict(entry.options)
     token = options.get(CONF_STREAM_TOKEN)

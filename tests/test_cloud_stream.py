@@ -15,10 +15,12 @@ from custom_components.ezviz_rtsp.cloud_stream import (
 from custom_components.ezviz_rtsp.const import DOMAIN
 from custom_components.ezviz_rtsp.live import (
     EzvizCloudCooldownError,
+    LiveMjpegView,
     LiveStream,
     LiveStreamView,
     async_close_live_streams,
     async_setup_live_streams,
+    mjpeg_path,
     stream_source,
     uses_cloud_stream,
 )
@@ -332,6 +334,47 @@ async def test_view_remuxes_the_stream_to_mpegts() -> None:
     assert proc.killed
 
 
+async def _serve_mjpeg(stream, token: str, proc=None):
+    hass = MagicMock()
+    written: list[bytes] = []
+    response = MagicMock()
+    response.prepare = AsyncMock()
+    response.write = AsyncMock(side_effect=written.append)
+    with (
+        patch.object(live, "find_stream", return_value=stream),
+        patch.object(live, "ffmpeg_binary", return_value="/ffmpeg"),
+        patch.object(live.web, "StreamResponse", return_value=response),
+        patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc or _Proc())) as spawn,
+    ):
+        result = await LiveMjpegView().get(_request(hass, token), "BK1")
+    return result, written, spawn, response
+
+
+async def test_mjpeg_view_encodes_the_stream_to_jpeg() -> None:
+    async def frames():
+        yield b"key"
+        yield b"next"
+
+    proc = _Proc()
+    _, written, spawn, response = await _serve_mjpeg(
+        MagicMock(token="tok", frames=frames), "tok", proc
+    )
+    assert written == [b"ts:key", b"ts:next"]
+    args = spawn.await_args.args
+    assert args[args.index("-c:v") + 1] == "mjpeg"
+    assert args[-2:] == ("mpjpeg", "pipe:1")
+    # The browser needs the muxer's own boundary in the content type.
+    assert response.content_type == "multipart/x-mixed-replace;boundary=ffmpeg"
+    assert proc.killed
+
+
+async def test_mjpeg_view_rejects_a_bad_token() -> None:
+    stream = MagicMock(token="tok", frames=MagicMock())
+    with patch.object(live, "find_stream", return_value=stream):
+        with pytest.raises(live.web.HTTPNotFound):
+            await LiveMjpegView().get(_request(MagicMock(), "wrong"), "BK1")
+
+
 async def test_view_transcodes_to_h264_when_asked() -> None:
     async def frames():
         yield b"key"
@@ -367,7 +410,8 @@ def test_setup_live_streams_registers_view_and_builds_a_stream_per_camera() -> N
     entry = MagicMock(options={})
     async_setup_live_streams(hass, entry, coordinator)
     assert set(coordinator.live_streams) == {"BK1", "BK2"}
-    hass.http.register_view.assert_called_once()
+    # Both the MPEG-TS view and the card's fast MJPEG view are registered.
+    assert hass.http.register_view.call_count == 2
     # A random token is persisted so other apps' addresses survive a restart.
     stored = hass.config_entries.async_update_entry.call_args.kwargs["options"]["stream_token"]
     assert {s.token for s in coordinator.live_streams.values()} == {stored}
@@ -386,6 +430,11 @@ def test_stream_source_uses_the_ha_port_and_token() -> None:
     assert stream_source(hass, stream) == (
         "http://127.0.0.1:8123/api/ezviz_rtsp/live/BK1?token=tok"
     )
+
+
+def test_mjpeg_path_is_relative_and_token_guarded() -> None:
+    stream = MagicMock(serial="BK1", token="tok")
+    assert mjpeg_path(stream) == "/api/ezviz_rtsp/mjpeg/BK1?token=tok"
 
 
 async def test_close_live_streams_closes_everyone() -> None:

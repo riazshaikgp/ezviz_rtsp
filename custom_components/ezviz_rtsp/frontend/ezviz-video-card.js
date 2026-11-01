@@ -10,10 +10,11 @@
 //   auto_play: false       # optional; play while the card is on screen
 //   max_seconds: 60        # optional; stop to save battery, 0 = never
 //
-// The card plays Home Assistant's own HLS of the camera (the integration relays
-// the EZVIZ cloud stream for cameras that expose no local RTSP). It is styled
-// after Mushroom cards — rounded card, an icon tile, a media area with a soft
-// play button — but needs neither Mushroom nor any other frontend dependency.
+// The card shows the camera's live picture from the integration's own stream:
+// its fast MJPEG path (an <img> that appears a few seconds after the camera
+// wakes) with Home Assistant's HLS as the fallback. It is styled after Mushroom
+// cards — rounded card, an icon tile, a media area with a soft play button — but
+// needs neither Mushroom nor any other frontend dependency.
 //
 // To keep a battery camera asleep, the card stops the stream whenever it is not
 // on screen (another dashboard view, another browser tab, scrolled away) or
@@ -159,7 +160,7 @@ const style = /* css */ `
     overflow: hidden;
     background: var(--secondary-background-color, #111);
   }
-  .media video {
+  .media video, .media .live {
     position: absolute; inset: 0; width: 100%; height: 100%;
     object-fit: contain; background: #000; display: block;
   }
@@ -275,8 +276,14 @@ class EzvizVideoCard extends HTMLElement {
   }
 
   disconnectedCallback() {
-    this._unwatchVisibility();
-    this._stop();
+    // A Lovelace view switch can move the card in the DOM, which fires a
+    // disconnect followed by a reconnect in the same task. Only a real removal
+    // should stop the stream, so wait a microtask and see if we came back.
+    queueMicrotask(() => {
+      if (this.isConnected) return;
+      this._unwatchVisibility();
+      this._stop(true);
+    });
   }
 
   // -- visibility ----------------------------------------------------------
@@ -589,17 +596,48 @@ class EzvizVideoCard extends HTMLElement {
     this._render();
 
     const lang = this._lang;
-    let entity = this._entityId();
-    if (!entity && this._config.serial) {
-      if (!this._devices) await this._loadDevices();
+    // The device list carries the serial -> entity map and the fast MJPEG
+    // address, so load it once when a serial is configured.
+    if (!this._devices && this._config.serial) {
+      await this._loadDevices();
       if (gen !== this._gen) return;
-      entity = this._findDevice()?.entity_id || null;
     }
+    let entity = this._entityId();
+    if (!entity) entity = this._findDevice()?.entity_id || null;
     if (!entity) {
       this._fail(t(lang, "no_entity"));
       return;
     }
-    await this._startHls(gen, lang, entity);
+
+    // Prefer the integration's own MJPEG: it appears a few seconds after the
+    // camera wakes, while Home Assistant's HLS waits for its stream worker to
+    // build segments (a much longer first start). HLS stays the fallback.
+    const mjpeg = this._findDevice()?.mjpeg_url;
+    if (mjpeg) {
+      this._startMjpeg(gen, lang, entity, new URL(mjpeg, window.location.origin).toString());
+    } else {
+      await this._startHls(gen, lang, entity);
+    }
+  }
+
+  _startMjpeg(gen, lang, entity, url) {
+    const img = document.createElement("img");
+    img.className = "live";
+    img.alt = "";
+    // 'load' fires when the first frame of the multipart stream is in; the open
+    // connection then keeps replacing the picture as the camera sends more.
+    img.addEventListener("load", () => this._onStarted(gen, lang));
+    img.addEventListener("error", () => {
+      if (gen === this._gen) this._fail(t(lang, "could_not_start", { msg: "MJPEG" }));
+    });
+    this._video = img;
+    this._state = "playing";
+    this._render();
+    img.src = url;
+    this._startupTimer = setTimeout(() => {
+      if (gen !== this._gen || this._started) return;
+      this._fail(t(lang, "no_start"));
+    }, STARTUP_SECONDS * 1000);
   }
 
   async _startHls(gen, lang, entity) {
