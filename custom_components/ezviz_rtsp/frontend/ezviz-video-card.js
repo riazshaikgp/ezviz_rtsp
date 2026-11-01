@@ -228,11 +228,6 @@ class EzvizVideoCard extends HTMLElement {
     this._startupTimer = null;
     // A pause the user asked for (video controls) must not be auto-undone.
     this._userPaused = false;
-    // When the clip started/first frame arrived (to resume it after a view
-    // switch), and the deadline to resume it before (null = not resuming,
-    // -1 = resume with no cap).
-    this._sessionDeadline = null;
-    this._resumeDeadline = null;
   }
 
   static getStubConfig() {
@@ -277,45 +272,27 @@ class EzvizVideoCard extends HTMLElement {
 
   connectedCallback() {
     this._watchVisibility();
-    // If the clip had time left when the card was removed (a view switch), pick
-    // it up where it left off instead of showing the play button.
-    if (this._resumeDeadline != null && this._resumeDeadline !== -1 && this._resumeDeadline <= Date.now()) {
-      this._resumeDeadline = null;
-    }
-    if (this._resumeDeadline != null && this._state === "idle") {
-      this._play();
-    } else {
-      this._maybeAutoPlay();
-    }
+    this._maybeAutoPlay();
   }
 
   disconnectedCallback() {
     // A Lovelace view switch removes the card from the DOM (and puts it back on
-    // return). Stop the stream, but remember to resume a clip that still had
-    // time left, so switching views does not end it.
+    // return); stop the stream for good, so it never keeps a battery camera
+    // awake behind another view.
     queueMicrotask(() => {
       if (this.isConnected) return;
       this._unwatchVisibility();
-      if (
-        (this._state === "playing" || this._state === "loading") &&
-        !this._userPaused
-      ) {
-        const max = Number(this._config?.max_seconds) || 0;
-        this._resumeDeadline =
-          this._sessionDeadline != null ? this._sessionDeadline : max > 0 ? Date.now() + max * 1000 : -1;
-      }
       this._stop(true);
     });
   }
 
   // -- visibility ----------------------------------------------------------
   //
-  // A battery camera must not sit awake with nobody looking, but a stream the
-  // user started has to keep running until its max_seconds are up. Lovelace
-  // keeps an inactive view in the DOM, so IntersectionObserver alone is not
-  // reliable; the card polls its own geometry and reacts at once to a hidden
-  // browser tab. Leaving the view only pauses the picture - the session and its
-  // countdown continue - and it resumes when the card is back on screen.
+  // A battery camera must not sit awake with nobody looking. Lovelace may keep
+  // an inactive view in the DOM (and removes it when it does not), so
+  // IntersectionObserver alone is not reliable; the card polls its own geometry
+  // and reacts at once to a hidden browser tab. Leaving the screen stops the
+  // stream for good - a clip never keeps a camera awake behind another view.
 
   _watchVisibility() {
     if (!this._visTimer) {
@@ -373,17 +350,10 @@ class EzvizVideoCard extends HTMLElement {
   }
 
   _onHidden() {
-    // Keep the session alive off screen: a video is only paused so the browser
-    // stops decoding (its max_seconds countdown keeps running), while the MJPEG
-    // picture simply carries on. Both resume/continue when the card is back.
+    // Off screen means nobody is watching: stop the stream for good (a battery
+    // camera must not be left streaming).
     if (this._state !== "playing" && this._state !== "loading") return;
-    if (this._video instanceof HTMLVideoElement) {
-      try {
-        this._video.pause();
-      } catch {
-        /* ignore */
-      }
-    }
+    this._stop(true);
   }
 
   _onShown() {
@@ -765,27 +735,9 @@ class EzvizVideoCard extends HTMLElement {
       this._header.status.textContent = t(lang, "live");
     }
     const configured = Number(this._config.max_seconds) || 0;
-    // A clip resumed after a view switch counts down the time it had left.
-    if (this._resumeDeadline != null) {
-      const resume = this._resumeDeadline;
-      this._resumeDeadline = null;
-      if (resume === -1) {
-        this._sessionDeadline = -1; // no cap: run until the card leaves the screen
-        return;
-      }
-      const remaining = resume - Date.now();
-      if (remaining <= 0) {
-        this._stop(true);
-        return;
-      }
-      this._sessionDeadline = resume;
-      this._timer = setTimeout(() => this._stop(true), remaining);
-      return;
-    }
     if (configured > 0) {
       // Back to the last picture and the play button, quietly - an auto-stop is
       // expected, not an error, so nothing is written over the card.
-      this._sessionDeadline = Date.now() + configured * 1000;
       this._timer = setTimeout(() => this._stop(true), configured * 1000);
     }
   }
@@ -805,7 +757,6 @@ class EzvizVideoCard extends HTMLElement {
     clearTimeout(this._startupTimer);
     this._startupTimer = null;
     this._started = false;
-    this._sessionDeadline = null;
     this._hls?.destroy();
     this._hls = null;
     if (this._video) {
