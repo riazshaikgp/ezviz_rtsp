@@ -3,7 +3,10 @@
 All notable changes to **Ezviz Cloud with Video** (`ezviz_rtsp`) are listed here.
 This project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.2.0] — 2026-11-01
+
+Two new Configure options put the streaming addresses and the post-view release
+delay under your control, and a switch decides who may read the addresses.
 
 ### Fixed
 - Turning the stream addresses for other apps **off** no longer breaks Home
@@ -92,6 +95,7 @@ battery camera can never be left streaming.
   expose no local RTSP, a bundled Mushroom-styled Lovelace card, and a
   token-guarded MPEG-TS address for go2rtc, Frigate and friends.
 
+[1.2.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.2.0
 [1.1.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.1.0
 [1.0.9]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.0.9
 [1.0.8]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.0.8
