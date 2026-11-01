@@ -110,12 +110,14 @@ runs for `max_seconds`; a **Stop** chip ends it early. When `max_seconds` runs
 out the card quietly returns to the last picture — tap the card again to watch
 another clip; nothing has to be reloaded.
 
-**A running clip keeps running.** If you switch to another dashboard view (or
-another browser tab) while the picture is playing, the card keeps the stream and
-its countdown going, and the picture is still there when you come back, as long
-as `max_seconds` has not passed. With `auto_play: true` the card also starts a
-clip by itself when it first appears; with the default `false` it waits for a
-tap. An idle card never wakes the camera.
+**A running clip survives a view switch.** When you switch to another dashboard
+view (or another browser tab) while the picture is playing, the card stops the
+stream (Lovelace removes it from the page) but remembers how much time was left;
+come back before `max_seconds` is up and the picture resumes for the remaining
+time. A clip you paused with the video controls, or one whose time already ran
+out, is not resumed. With `auto_play: true` the card also starts a clip by itself
+when it first appears; with the default `false` it waits for a tap. An idle card
+never wakes the camera.
 
 A **battery camera's charge** is shown in the top-right corner, opposite the
 camera name, when the integration exposes it.
