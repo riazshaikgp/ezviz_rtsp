@@ -247,6 +247,13 @@ async def test_powered_stream_has_no_hard_limit(upstream) -> None:
     await stream.async_close()
 
 
+def test_linger_defaults_and_is_configurable() -> None:
+    assert live.LINGER == 10
+    assert _stream()._linger_seconds == 10
+    stream = LiveStream(_hass(), _coordinator(), "BK1", 1, lambda: None, linger=3)
+    assert stream._linger_seconds == 3
+
+
 async def test_battery_stream_without_a_limit_has_no_deadline(upstream) -> None:
     stream = LiveStream(
         _hass(), _coordinator(), "BK1", 1, lambda: None, battery=True, max_session=0
@@ -579,8 +586,17 @@ async def test_options_menu_and_video_step() -> None:
     flow, _ = _options_flow({})
     menu = await flow.async_step_init()
     assert menu["type"] == "menu"
-    assert menu["menu_options"] == ["general", "stream", "video", "codes"]
+    assert menu["menu_options"] == ["general", "stream", "release", "video", "codes"]
     result = await flow.async_step_video({"transcode": True})
+    assert result["data"]["transcode"] is True
+
+
+async def test_options_release_step_saves_the_linger() -> None:
+    flow, entry = _options_flow({})
+    entry.options = {"transcode": True}
+    result = await flow.async_step_release({"linger": 5})
+    assert result["data"]["linger"] == 5
+    # The other options are kept.
     assert result["data"]["transcode"] is True
 
 

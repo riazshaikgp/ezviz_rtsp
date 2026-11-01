@@ -52,6 +52,7 @@ from .const import (
     CONF_CODE,
     CONF_CODES,
     CONF_FFMPEG_ARGUMENTS,
+    CONF_LINGER,
     CONF_MAX_SESSION,
     CONF_MFA,
     CONF_RFSESSION_ID,
@@ -66,7 +67,7 @@ from .const import (
     RUSSIA_URL,
 )
 from .coordinator import EzvizConfigEntry
-from .live import MAX_SESSION, uses_cloud_stream
+from .live import LINGER, MAX_SESSION, uses_cloud_stream
 
 _LOGGER = logging.getLogger(__name__)
 DEFAULT_OPTIONS = {
@@ -482,7 +483,8 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
     ) -> ConfigFlowResult:
         """Show the options menu; each part saves on its own."""
         return self.async_show_menu(
-            step_id="init", menu_options=["general", "stream", "video", "codes"]
+            step_id="init",
+            menu_options=["general", "stream", "release", "video", "codes"],
         )
 
     async def async_step_general(
@@ -603,6 +605,43 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
                             min=0,
                             max=3600,
                             step=30,
+                            mode=NumberSelectorMode.BOX,
+                            unit_of_measurement="s",
+                        )
+                    )
+                }
+            ),
+        )
+
+    async def async_step_release(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """How long to hold the stream open after the last viewer leaves.
+
+        Holding it briefly means a quick re-play does not wake a battery camera
+        again; ``0`` closes the camera at once.
+        """
+        options = self.config_entry.options
+        if user_input is not None:
+            return self.async_create_entry(
+                title="",
+                data={
+                    **options,
+                    CONF_LINGER: int(user_input[CONF_LINGER]),
+                },
+            )
+        return self.async_show_form(
+            step_id="release",
+            data_schema=probatio.Schema(
+                {
+                    probatio.Optional(
+                        CONF_LINGER,
+                        default=options.get(CONF_LINGER, LINGER),
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0,
+                            max=300,
+                            step=1,
                             mode=NumberSelectorMode.BOX,
                             unit_of_measurement="s",
                         )

@@ -137,8 +137,9 @@ it:
 
 1. The **card** stops the stream when `max_seconds` runs out, and releases the
    reader.
-2. The **integration** closes the cloud session **20 seconds** after the last
-   reader leaves (`LINGER` in `live.py`).
+2. The **integration** closes the cloud session shortly after the last reader
+   leaves — **10 seconds** by default (changeable under **Configure → Release the
+   camera after**; `0` = at once).
 3. Even if a client misbehaves entirely, a battery camera is cut off after
    **5 minutes** of one continuous stream (changeable under **Configure →
    Maximum stream duration**); powered cameras are not capped.
@@ -167,6 +168,9 @@ Everything below lives under **Configure** on the integration:
   before the integration stops it, in seconds (default **300**; `0` removes the
   cap). This is the safety net that keeps a battery camera from being left
   streaming, whatever a client does.
+- **Release the camera after** — how long the cloud stream is held open after the
+  last viewer leaves, in seconds (default **10**; `0` releases it at once). A
+  short hold means a quick re-play does not wake the camera again.
 - **General** — request timeout and the ffmpeg arguments for cameras you added
   over local RTSP.
 - **Stream address for other apps** — see below.

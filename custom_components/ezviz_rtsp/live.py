@@ -35,6 +35,7 @@ from .cloud_stream import (
 )
 from .const import (
     CONF_CODES,
+    CONF_LINGER,
     CONF_MAX_SESSION,
     CONF_STREAM_TOKEN,
     CONF_TRANSCODE,
@@ -47,8 +48,9 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-# Keeps the stream open between two quick readers (a card reload, a stream retry).
-LINGER = 20
+# Keeps the stream open between two quick readers (a card reload, a stream retry)
+# so a battery camera is not woken again. Configurable under Configure.
+LINGER = 10
 # After an open that gave no video, refuse new opens for this long instead of
 # waking the camera again for every retry.
 COOLDOWN = 60
@@ -94,6 +96,7 @@ class LiveStream:
         encrypted: bool = False,
         battery: bool = False,
         max_session: float = MAX_SESSION,
+        linger: float = LINGER,
     ) -> None:
         self._hass = hass
         self._coordinator = coordinator
@@ -106,6 +109,9 @@ class LiveStream:
         # seconds; 0 disables the cap).
         self.battery = battery
         self._max_session = max_session
+        # How long the stream is held open after the last reader leaves, so a
+        # quick re-open does not wake the camera again.
+        self._linger_seconds = linger
         self._readers: set[asyncio.Queue[_Item]] = set()
         self._task: asyncio.Task[None] | None = None
         self._linger: asyncio.TimerHandle | None = None
@@ -166,7 +172,7 @@ class LiveStream:
         finally:
             self._readers.discard(queue)
             if not self._readers and self._task is not None and self._linger is None:
-                self._linger = loop.call_later(LINGER, self._stop)
+                self._linger = loop.call_later(self._linger_seconds, self._stop)
 
     def _stop(self) -> None:
         self._linger = None
@@ -503,6 +509,9 @@ def async_setup_live_streams(
     transcode = bool(entry.options.get(CONF_TRANSCODE, True))
     # How long one battery-camera stream may run before it is cut off (0 = never).
     max_session = float(entry.options.get(CONF_MAX_SESSION, MAX_SESSION))
+    # How long the stream is held open after the last viewer leaves, so a quick
+    # re-open does not wake the camera again (0 closes it at once).
+    linger = float(entry.options.get(CONF_LINGER, LINGER))
     for serial, value in coordinator.data.items():
         def _code(serial: str = serial) -> str | None:
             return entry.options.get(CONF_CODES, {}).get(serial)
@@ -524,6 +533,7 @@ def async_setup_live_streams(
             encrypted=bool(value.get("encrypted")),
             battery=battery,
             max_session=max_session,
+            linger=linger,
         )
 
 

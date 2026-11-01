@@ -75,6 +75,7 @@ async def _setup(hass) -> MockConfigEntry:
             "ffmpeg_arguments": "/Streaming/Channels/102",
             "timeout": 25,
             "max_session": 30,
+            "linger": 5,
         },
         unique_id="owner@example.com",
     )
@@ -109,6 +110,8 @@ async def test_battery_camera_sets_up_and_offers_a_cloud_stream(hass) -> None:
     assert entry.runtime_data.live_streams["BK1"].battery is True
     # The cap comes from the options ("Maximum stream duration").
     assert entry.runtime_data.live_streams["BK1"]._max_session == 30
+    # The release delay comes from the options ("Release the camera after").
+    assert entry.runtime_data.live_streams["BK1"]._linger_seconds == 5
     assert hass.data[DATA_LIVE_VIEW] is True
 
     # A battery camera must not trigger the RTSP discovery flow.

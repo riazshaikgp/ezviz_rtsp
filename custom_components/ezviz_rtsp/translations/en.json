@@ -196,7 +196,8 @@
           "codes": "Verification codes",
           "general": "General",
           "stream": "Maximum stream duration",
-          "video": "Video transcoding"
+          "video": "Video transcoding",
+          "release": "Release the camera after"
         }
       },
       "general": {
@@ -241,6 +242,16 @@
         },
         "description": "A battery camera is stopped after this long even if something is still watching, so it can never be left streaming and draining. This is a safety net independent of the card's own stop button.",
         "title": "Maximum stream duration"
+      },
+      "release": {
+        "data": {
+          "linger": "Release the camera after"
+        },
+        "data_description": {
+          "linger": "How long the stream is held open after the last viewer leaves, in seconds, so a quick re-play does not wake the camera again. 0 closes it at once."
+        },
+        "description": "After the last viewer leaves, the cloud stream is held open for this long before the camera is released. A short hold keeps a second play from waking the camera again; 0 releases it immediately.",
+        "title": "Release the camera after"
       }
     }
   },

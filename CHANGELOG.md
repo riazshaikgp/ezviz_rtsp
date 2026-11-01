@@ -3,6 +3,14 @@
 All notable changes to **Ezviz Cloud with Video** (`ezviz_rtsp`) are listed here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Release the camera after** option (Configure → Release the camera after):
+  how long the cloud stream is held open after the last viewer leaves, in seconds
+  (default **10**; `0` releases the camera at once). A short hold keeps a quick
+  re-play from waking a battery camera again.
+
 ## [1.1.0] — 2026-11-01
 
 The live view is fast now, the card looks and behaves like a Mushroom card, and a
