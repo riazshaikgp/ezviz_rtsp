@@ -3,6 +3,27 @@
 All notable changes to **Ezviz Cloud with Video** (`ezviz_rtsp`) are listed here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] — 2026-11-04
+
+A housekeeping release that gets the repository ready for the HACS store.
+
+### Added
+- **Integration categories** in the manifest (`security_safety.cameras`,
+  `security_safety.doorbells_intercoms`) so the integration is listed correctly
+  in the HACS Marketplace.
+- The repository is now validated by the **HACS Action** and **hassfest** on
+  every push and pull request (and daily), so it keeps meeting the HACS
+  requirements.
+
+### Changed
+- The `pyezvizapi` requirement is no longer pinned (`>=1.0.5.0`), so it can
+  follow the version Home Assistant itself ships.
+
+### Docs
+- README corrections: the card is a corner play/stop chip that plays its own
+  fast MJPEG stream, transcoding applies to Home Assistant's stream and other
+  apps, and the other-apps addresses are opt-in. Plus a larger Ko-fi button.
+
 ## [1.2.0] — 2026-11-01
 
 Two new Configure options put the streaming addresses and the post-view release
@@ -95,6 +116,7 @@ battery camera can never be left streaming.
   expose no local RTSP, a bundled Mushroom-styled Lovelace card, and a
   token-guarded MPEG-TS address for go2rtc, Frigate and friends.
 
+[1.2.1]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.2.1
 [1.2.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.2.0
 [1.1.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.1.0
 [1.0.9]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.0.9

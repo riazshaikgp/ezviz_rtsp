@@ -5,6 +5,8 @@ doorbells, peepholes and other sleepy devices.*
 
 ![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-2f6f4e)
 ![Home Assistant 2026.10+](https://img.shields.io/badge/Home_Assistant-2026.10%2B-3d7ff2)
+[![HACS validation](https://github.com/tarasifua/ezviz_rtsp/actions/workflows/validate.yml/badge.svg)](https://github.com/tarasifua/ezviz_rtsp/actions/workflows/validate.yml)
+[![Hassfest](https://github.com/tarasifua/ezviz_rtsp/actions/workflows/hassfest.yml/badge.svg)](https://github.com/tarasifua/ezviz_rtsp/actions/workflows/hassfest.yml)
 
 Licensed under **[Apache-2.0](LICENSE)**. Requires **Home Assistant 2026.10 or newer**.
 See the [changelog](CHANGELOG.md) for what's new.
