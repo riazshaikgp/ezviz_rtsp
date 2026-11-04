@@ -4,6 +4,7 @@ import logging
 from typing import override
 
 import aiohttp
+import probatio as vol
 from homeassistant.components import ffmpeg
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.components.ffmpeg import get_ffmpeg_manager
@@ -11,6 +12,7 @@ from homeassistant.components.stream import CONF_USE_WALLCLOCK_AS_TIMESTAMPS
 from homeassistant.config_entries import SOURCE_IGNORE, SOURCE_INTEGRATION_DISCOVERY
 from homeassistant.const import CONF_IP_ADDRESS, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import discovery_flow
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import (
@@ -21,11 +23,14 @@ from pyezvizapi.exceptions import HTTPError, InvalidHost, PyEzvizError
 from pyezvizapi.utils import decrypt_image
 
 from .const import (
+    ATTR_LEVEL,
     ATTR_SERIAL,
+    ATTR_TYPE,
     CONF_FFMPEG_ARGUMENTS,
     DEFAULT_CAMERA_USERNAME,
     DEFAULT_FFMPEG_ARGUMENTS,
     DOMAIN,
+    SERVICE_DETECTION_SENSITIVITY,
     SERVICE_WAKE_DEVICE,
 )
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
@@ -126,6 +131,16 @@ async def async_setup_entry(
 
     platform.async_register_entity_service(
         SERVICE_WAKE_DEVICE, None, "perform_wake_device"
+    )
+    platform.async_register_entity_service(
+        SERVICE_DETECTION_SENSITIVITY,
+        {
+            vol.Required(ATTR_LEVEL): cv.positive_int,
+            vol.Optional(ATTR_TYPE, default=0): vol.All(
+                vol.Coerce(int), vol.In([0, 3])
+            ),
+        },
+        "set_alarm_detection_sensibility",
     )
 
 
@@ -291,3 +306,16 @@ class EzvizCamera(EzvizEntity, Camera):
             self.coordinator.ezviz_client.get_detection_sensibility(self._serial)
         except (HTTPError, PyEzvizError) as err:
             raise PyEzvizError("Cannot wake device") from err
+
+    def set_alarm_detection_sensibility(
+        self, level: int, type_value: int = 0
+    ) -> None:
+        """Set the motion-detection sensitivity of the camera."""
+        try:
+            self.coordinator.ezviz_client.detection_sensibility(
+                self._serial, level, type_value
+            )
+        except (HTTPError, PyEzvizError) as err:
+            raise PyEzvizError(
+                f"Cannot set detection sensitivity level on {self.name}"
+            ) from err

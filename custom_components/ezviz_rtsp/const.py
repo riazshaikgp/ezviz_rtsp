@@ -30,6 +30,10 @@ DATA_WS = f"{DOMAIN}_ws_registered"
 # The Lovelace card the integration ships and serves.
 CARD_FILENAME = "ezviz-video-card.js"
 CARD_URL = f"/{DOMAIN}/{CARD_FILENAME}"
+# hls.js is bundled with the integration and served from its own static path,
+# so the card never loads third-party code from a public CDN at runtime.
+HLS_FILENAME = "hls.min.js"
+HLS_URL = f"/{DOMAIN}/{HLS_FILENAME}"
 
 # Services data
 DIR_UP = "up"

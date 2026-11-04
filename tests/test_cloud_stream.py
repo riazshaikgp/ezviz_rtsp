@@ -16,12 +16,13 @@ from custom_components.ezviz_rtsp.cloud_stream import (
 from custom_components.ezviz_rtsp.const import DOMAIN
 from custom_components.ezviz_rtsp.live import (
     EzvizCloudCooldownError,
+    LiveCardMjpegView,
     LiveMjpegView,
     LiveStream,
     LiveStreamView,
     async_close_live_streams,
     async_setup_live_streams,
-    mjpeg_path,
+    card_mjpeg_path,
     stream_source,
     uses_cloud_stream,
 )
@@ -351,7 +352,6 @@ async def test_view_remuxes_the_stream_to_mpegts() -> None:
 
 
 async def _serve_mjpeg(stream, token: str, proc=None):
-    _allows(stream)
     hass = MagicMock()
     written: list[bytes] = []
     response = MagicMock()
@@ -367,6 +367,26 @@ async def _serve_mjpeg(stream, token: str, proc=None):
     return result, written, spawn, response
 
 
+async def _serve_card(stream, proc=None):
+    """Serve the card's authenticated picture view (no token; HA auth is the gate)."""
+    hass = MagicMock()
+    written: list[bytes] = []
+    response = MagicMock()
+    response.prepare = AsyncMock()
+    response.write = AsyncMock(side_effect=written.append)
+    request = MagicMock()
+    request.app = {live.KEY_HASS: hass}
+    request.query = {}
+    with (
+        patch.object(live, "find_stream", return_value=stream),
+        patch.object(live, "ffmpeg_binary", return_value="/ffmpeg"),
+        patch.object(live.web, "StreamResponse", return_value=response),
+        patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc or _Proc())) as spawn,
+    ):
+        result = await LiveCardMjpegView().get(request, "BK1")
+    return result, written, spawn, response
+
+
 async def test_mjpeg_view_encodes_the_stream_to_jpeg() -> None:
     async def frames():
         yield b"key"
@@ -374,9 +394,7 @@ async def test_mjpeg_view_encodes_the_stream_to_jpeg() -> None:
 
     proc = _Proc()
     _, written, spawn, response = await _serve_mjpeg(
-        MagicMock(token="tok", internal_token="tok", external_enabled=True, frames=frames),
-        "tok",
-        proc,
+        MagicMock(token="tok", external_enabled=True, frames=frames), "tok", proc
     )
     assert written == [b"ts:key", b"ts:next"]
     args = spawn.await_args.args
@@ -387,15 +405,37 @@ async def test_mjpeg_view_encodes_the_stream_to_jpeg() -> None:
     assert proc.killed
 
 
-async def test_mjpeg_view_rejects_a_bad_token() -> None:
-    stream = _allows(MagicMock(
-        token="tok", internal_token="int", external_enabled=True, frames=MagicMock()
-    ))
+async def test_card_view_is_authenticated_while_the_public_view_is_not() -> None:
+    # The card reads a view HA authenticates (via a signed URL); the token view
+    # for other apps keeps working without HA credentials.
+    assert LiveCardMjpegView.requires_auth is True
+    assert LiveMjpegView.requires_auth is False
+
+
+async def test_card_view_serves_jpeg_without_a_token() -> None:
+    async def frames():
+        yield b"key"
+
+    _, written, _, response = await _serve_card(MagicMock(serial="BK1", frames=frames), _Proc())
+    assert written == [b"ts:key"]
+    assert response.content_type == "multipart/x-mixed-replace;boundary=ffmpeg"
+
+
+async def test_mjpeg_view_rejects_a_bad_or_internal_token() -> None:
+    stream = MagicMock(
+        token="pub", internal_token="internal", external_enabled=True, frames=MagicMock()
+    )
     with (
         patch.object(live, "find_stream", return_value=stream),
         pytest.raises(live.web.HTTPNotFound),
     ):
         await LiveMjpegView().get(_request(MagicMock(), "wrong"), "BK1")
+    # The never-rotating internal token no longer opens the public view.
+    with (
+        patch.object(live, "find_stream", return_value=stream),
+        pytest.raises(live.web.HTTPNotFound),
+    ):
+        await LiveMjpegView().get(_request(MagicMock(), "internal"), "BK1")
 
 
 async def test_view_transcodes_to_h264_when_asked() -> None:
@@ -433,8 +473,8 @@ def test_setup_live_streams_registers_view_and_builds_a_stream_per_camera() -> N
     entry = MagicMock(options={})
     async_setup_live_streams(hass, entry, coordinator)
     assert set(coordinator.live_streams) == {"BK1", "BK2"}
-    # Both the MPEG-TS view and the card's fast MJPEG view are registered.
-    assert hass.http.register_view.call_count == 2
+    # The MPEG-TS view, the public MJPEG view and the card's authenticated view.
+    assert hass.http.register_view.call_count == 3
     # A random token is persisted so other apps' addresses survive a restart.
     stored = hass.config_entries.async_update_entry.call_args.kwargs["options"]["stream_token"]
     assert {s.token for s in coordinator.live_streams.values()} == {stored}
@@ -458,9 +498,8 @@ def test_stream_source_uses_the_ha_port_and_token() -> None:
     )
 
 
-def test_mjpeg_path_is_relative_and_token_guarded() -> None:
-    stream = MagicMock(serial="BK1", internal_token="int")
-    assert mjpeg_path(stream) == "/api/ezviz_rtsp/mjpeg/BK1?token=int"
+def test_card_mjpeg_path_is_the_authenticated_view() -> None:
+    assert card_mjpeg_path("BK1") == "/api/ezviz_rtsp/card/BK1"
 
 
 async def test_live_view_blocked_when_other_apps_are_off() -> None:
@@ -482,21 +521,23 @@ async def test_live_view_blocked_when_other_apps_are_off() -> None:
     assert written == [b"ts:key"]
 
 
-async def test_mjpeg_view_keeps_the_card_token_when_other_apps_are_off() -> None:
+async def test_mjpeg_view_needs_external_enabled_and_the_public_token() -> None:
     async def frames():
         yield b"key"
 
     stream = MagicMock(
         token="pub", internal_token="int", external_enabled=False, frames=frames
     )
-    _, written, _, _ = await _serve_mjpeg(stream, "int", _Proc())
-    assert written == [b"ts:key"]
-    # The public token is refused while other apps are turned off.
+    # With other apps turned off, even the public token is refused.
     with (
         patch.object(live, "find_stream", return_value=stream),
         pytest.raises(live.web.HTTPNotFound),
     ):
         await LiveMjpegView().get(_request(MagicMock(), "pub"), "BK1")
+    # Turned on, the public token reads the picture for other apps.
+    stream.external_enabled = True
+    _, written, _, _ = await _serve_mjpeg(stream, "pub", _Proc())
+    assert written == [b"ts:key"]
 
 
 async def test_close_live_streams_closes_everyone() -> None:

@@ -111,7 +111,7 @@ async def test_battery_camera_sets_up_and_offers_a_cloud_stream(hass) -> None:
     assert entry.runtime_data.live_streams["BK1"]._max_session == 30
     # The release delay comes from the options ("Release the camera after").
     assert entry.runtime_data.live_streams["BK1"]._linger_seconds == 5
-    # Other apps are blocked by default; the card has its own token so it works anyway.
+    # Other apps are blocked by default; the card reads an authenticated view.
     assert entry.runtime_data.live_streams["BK1"].external_enabled is False
     assert entry.options["internal_token"]
     assert hass.data[DATA_LIVE_VIEW] is True
@@ -141,6 +141,10 @@ async def test_battery_camera_sets_up_and_offers_a_cloud_stream(hass) -> None:
     # The URL carries the integration version, so the card can log it.
     assert any("version=" in url for url in module_urls), module_urls
 
+    # Both integration services are registered (wake + detection sensitivity).
+    assert hass.services.has_service(DOMAIN, "wake_device")
+    assert hass.services.has_service(DOMAIN, "set_alarm_detection_sensibility")
+
 
 async def test_card_file_is_served(hass, hass_client) -> None:
     await _setup(hass)
@@ -152,6 +156,18 @@ async def test_card_file_is_served(hass, hass_client) -> None:
     # The file defines and announces the card.
     assert "custom:ezviz-video-card" in body or "ezviz-video-card" in body
     assert "window.customCards.push" in body
+    # hls.js is bundled, never fetched from a CDN.
+    assert "cdn.jsdelivr.net" not in body
+    assert "hls.min.js" in body
+
+
+async def test_bundled_hls_is_served(hass, hass_client) -> None:
+    await _setup(hass)
+    client = await hass_client()
+    resp = await client.get("/ezviz_rtsp/hls.min.js")
+    assert resp.status == 200
+    assert "javascript" in resp.headers["Content-Type"]
+    assert "Hls" in await resp.text()
 
 
 async def test_card_devices_websocket_lists_the_camera(hass, hass_ws_client) -> None:
@@ -166,5 +182,5 @@ async def test_card_devices_websocket_lists_the_camera(hass, hass_ws_client) -> 
     assert device["battery"] is True
     assert device["battery_level"] == 52
     assert "battery_entity_id" in device
-    assert device["mjpeg_url"].startswith(f"/api/{DOMAIN}/mjpeg/BK1?token=")
+    assert device["mjpeg_url"].startswith(f"/api/{DOMAIN}/card/BK1?authSig=")
     assert device["entity_id"]

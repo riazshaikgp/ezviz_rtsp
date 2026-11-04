@@ -19,6 +19,7 @@ import hmac
 import logging
 import secrets
 from collections.abc import AsyncGenerator, Callable
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from aiohttp import web
@@ -431,13 +432,35 @@ class LiveStreamView(HomeAssistantView):
             )
 
 
-class LiveMjpegView(HomeAssistantView):
-    """Serves a camera's live picture as MJPEG, ready for a browser <img>.
+async def _stream_mjpeg(request: web.Request, stream: LiveStream) -> web.StreamResponse:
+    """Encode the shared stream to multipart JPEG while the client stays."""
+    hass = request.app[KEY_HASS]
+    async with contextlib.aclosing(stream.frames()) as frames:
+        try:
+            first = await anext(frames)
+        except (EzvizStreamError, StopAsyncIteration) as err:
+            _LOGGER.warning("Live view of %s could not start: %s", stream.serial, err)
+            raise web.HTTPServiceUnavailable from err
+        args = (
+            "-map", "0:v:0", "-c:v", "mjpeg", "-q:v", str(_MJPEG_QUALITY),
+            "-vf", f"scale={_MJPEG_WIDTH}:-2", "-r", str(_MJPEG_FPS),
+            "-f", "mpjpeg", "pipe:1",
+        )
+        # ffmpeg's mpjpeg muxer writes its own '--ffmpeg' boundary.
+        return await _pipe_frames(
+            hass, request, frames, first, args,
+            "multipart/x-mixed-replace;boundary=ffmpeg",
+        )
 
-    Home Assistant's own camera view is HLS, which only shows its first frame
-    once the stream worker has built segments — a slow first start. This encodes
-    the cloud stream straight to JPEG, so the picture appears a few seconds after
-    the camera wakes, the same fast path the EZVIZ app uses.
+
+class LiveMjpegView(HomeAssistantView):
+    """A camera's live picture as MJPEG for other apps, guarded by the stream token.
+
+    go2rtc, a dashboard ``<img>`` and friends read this while "Allow other apps
+    to read the stream" is on. They cannot send Home Assistant credentials, so
+    the random token in the query guards it, and the switch turns it off
+    entirely. The bundled card does not use this view: it reads the
+    authenticated one below.
     """
 
     url = f"/api/{DOMAIN}/mjpeg/{{serial}}"
@@ -448,24 +471,39 @@ class LiveMjpegView(HomeAssistantView):
         """Stream multipart JPEG while the client stays connected."""
         hass = request.app[KEY_HASS]
         stream = find_stream(hass, serial)
-        if stream is None or not stream.allows(request.query.get("token", "")):
+        if (
+            stream is None
+            or not stream.external_enabled
+            or not hmac.compare_digest(request.query.get("token", ""), stream.token)
+        ):
             raise web.HTTPNotFound
-        async with contextlib.aclosing(stream.frames()) as frames:
-            try:
-                first = await anext(frames)
-            except (EzvizStreamError, StopAsyncIteration) as err:
-                _LOGGER.warning("Live view of %s could not start: %s", serial, err)
-                raise web.HTTPServiceUnavailable from err
-            args = (
-                "-map", "0:v:0", "-c:v", "mjpeg", "-q:v", str(_MJPEG_QUALITY),
-                "-vf", f"scale={_MJPEG_WIDTH}:-2", "-r", str(_MJPEG_FPS),
-                "-f", "mpjpeg", "pipe:1",
-            )
-            # ffmpeg's mpjpeg muxer writes its own '--ffmpeg' boundary.
-            return await _pipe_frames(
-                hass, request, frames, first, args,
-                "multipart/x-mixed-replace;boundary=ffmpeg",
-            )
+        return await _stream_mjpeg(request, stream)
+
+
+class LiveCardMjpegView(HomeAssistantView):
+    """The bundled card's live picture, behind Home Assistant authentication.
+
+    Home Assistant's own camera view is HLS, which only shows its first frame
+    once the stream worker has built segments — a slow first start. This encodes
+    the cloud stream straight to JPEG, so the picture appears a few seconds after
+    the camera wakes, the same fast path the EZVIZ app uses.
+
+    The card reaches it through a short-lived signed path (``authSig``) that the
+    websocket command hands out, so a leaked URL — or a user who is later
+    removed — cannot keep watching the camera.
+    """
+
+    url = f"/api/{DOMAIN}/card/{{serial}}"
+    name = f"api:{DOMAIN}:card"
+    requires_auth = True
+
+    async def get(self, request: web.Request, serial: str) -> web.StreamResponse:
+        """Stream multipart JPEG while the client stays connected."""
+        hass = request.app[KEY_HASS]
+        stream = find_stream(hass, serial)
+        if stream is None:
+            raise web.HTTPNotFound
+        return await _stream_mjpeg(request, stream)
 
 
 def find_stream(hass: HomeAssistant, serial: str) -> LiveStream | None:
@@ -492,9 +530,14 @@ def stream_source(hass: HomeAssistant, stream: LiveStream) -> str:
     return f"{scheme}://127.0.0.1:{port}/api/{DOMAIN}/live/{stream.serial}?token={stream.internal_token}"
 
 
-def mjpeg_path(stream: LiveStream) -> str:
-    """The card's picture address, relative to HA's origin (its own token)."""
-    return f"/api/{DOMAIN}/mjpeg/{stream.serial}?token={stream.internal_token}"
+# How long the card's signed picture URL stays valid. It is short because the
+# card asks for a fresh one on every play, and a leaked link should not last.
+CARD_MJPEG_TTL = timedelta(seconds=300)
+
+
+def card_mjpeg_path(serial: str) -> str:
+    """The card's picture path (its authenticated view), before it is signed."""
+    return f"/api/{DOMAIN}/card/{serial}"
 
 
 def uses_cloud_stream(hass: HomeAssistant, serial: str) -> bool:
@@ -520,6 +563,7 @@ def async_setup_live_streams(
         hass.data[DATA_LIVE_VIEW] = True
         hass.http.register_view(LiveStreamView())
         hass.http.register_view(LiveMjpegView())
+        hass.http.register_view(LiveCardMjpegView())
 
     options = dict(entry.options)
     token = options.get(CONF_STREAM_TOKEN)

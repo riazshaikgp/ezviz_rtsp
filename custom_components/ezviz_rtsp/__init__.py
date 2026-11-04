@@ -33,6 +33,8 @@ from .const import (
     DEFAULT_FFMPEG_ARGUMENTS,
     DEFAULT_TIMEOUT,
     DOMAIN,
+    HLS_FILENAME,
+    HLS_URL,
 )
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
 from .live import async_close_live_streams, async_setup_live_streams
@@ -64,10 +66,15 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         return
     hass.data[DATA_CARD] = True
 
-    card = Path(__file__).parent / "frontend" / CARD_FILENAME
+    frontend = Path(__file__).parent / "frontend"
+    card = frontend / CARD_FILENAME
+    hls = frontend / HLS_FILENAME
     content = await hass.async_add_executor_job(card.read_bytes)
     await hass.http.async_register_static_paths(
-        [StaticPathConfig(CARD_URL, str(card), True)]
+        [
+            StaticPathConfig(CARD_URL, str(card), True),
+            StaticPathConfig(HLS_URL, str(hls), True),
+        ]
     )
     # The file is served with a long cache, so the URL carries a hash of its
     # content: any change to the card reaches browsers on the next page load.

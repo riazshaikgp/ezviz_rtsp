@@ -3,6 +3,30 @@
 All notable changes to **Ezviz Cloud with Video** (`ezviz_rtsp`) are listed here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] — 2026-11-04
+
+Fixes from the HACS review: the card no longer loads code from a CDN, its live
+picture sits behind Home Assistant authentication, and two smaller bugs are gone.
+
+### Added
+- **hls.js is bundled** with the integration and served from its own static
+  path (with its license in `frontend/hls.min.js.LICENSE.txt`), so the card
+  works without internet access and never fetches code from a public CDN.
+
+### Changed
+- The card's live picture is served from an **authenticated view**, reached
+  through a short-lived **signed URL** (`async_sign_path`) that the websocket
+  command hands out. A link that leaks — or a user you later remove — can no
+  longer keep watching a camera. The opt-in token addresses for go2rtc, Frigate
+  and friends are unchanged.
+
+### Fixed
+- The siren now **awaits** its turn-on call, so a failed command is reported
+  instead of the siren showing as on while nothing happened.
+- The `set_alarm_detection_sensibility` service is **registered** (it was
+  declared but did nothing), and the service target picker points at
+  `ezviz_rtsp` instead of the core `ezviz` domain.
+
 ## [1.2.1] — 2026-11-04
 
 A housekeeping release that gets the repository ready for the HACS store.
@@ -116,6 +140,7 @@ battery camera can never be left streaming.
   expose no local RTSP, a bundled Mushroom-styled Lovelace card, and a
   token-guarded MPEG-TS address for go2rtc, Frigate and friends.
 
+[1.3.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.3.0
 [1.2.1]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.2.1
 [1.2.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.2.0
 [1.1.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.1.0

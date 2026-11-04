@@ -15,15 +15,17 @@
 // wakes) with Home Assistant's HLS as the fallback. It is styled after Mushroom
 // cards — rounded card, an icon tile, and a small play/stop chip in the corner
 // of the picture — but needs neither Mushroom nor any other frontend dependency.
+// hls.js is bundled with the integration and served from its own path, so no
+// code is ever loaded from a CDN.
 //
 // To keep a battery camera asleep, the card stops the stream whenever it is not
 // on screen (another dashboard view, another browser tab, scrolled away) or
 // after max_seconds, and starts it again on return when auto_play is on.
 
-const HLS_VERSION = "1.5.20";
-const HLS_URL = `https://cdn.jsdelivr.net/npm/hls.js@${HLS_VERSION}/dist/hls.min.js`;
-// sha384 of that file; update it with the version.
-const HLS_SRI = "sha384-V5ruNBgmYcC3SJRUQeNykAAAgde5gOFq/Hu0CZj7bygDP0yRIhkvX8+w0u/7mRvr";
+// hls.js is bundled with the integration and served from its own static path,
+// next to this card — no third-party code is loaded from a CDN, and it works on
+// installations without internet access.
+const HLS_SCRIPT = "hls.min.js";
 
 // A battery camera takes a while to wake and send its first frame. max_seconds
 // counts from the first frame; this is a separate cap on the wait for it.
@@ -45,14 +47,18 @@ const CARD_VERSION = (() => {
 })();
 
 // hls.js is loaded once per page, only when a browser can't play HLS natively.
+// It is served by the integration itself, from the same directory as this card.
 let hlsLoading = null;
 const loadHls = () => {
   if (window.Hls) return Promise.resolve(window.Hls);
   hlsLoading ||= new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = HLS_URL;
-    script.integrity = HLS_SRI;
-    script.crossOrigin = "anonymous";
+    try {
+      script.src = new URL(HLS_SCRIPT, import.meta.url).toString();
+    } catch {
+      reject(new Error("hls.js"));
+      return;
+    }
     script.onload = () => (window.Hls ? resolve(window.Hls) : reject(new Error("hls.js")));
     script.onerror = () => reject(new Error("hls.js"));
     document.head.appendChild(script);
@@ -356,13 +362,17 @@ class EzvizVideoCard extends HTMLElement {
 
   // -- data ----------------------------------------------------------------
 
-  async _loadDevices() {
+  async _loadDevices(force = false) {
     if (!this._hass) return;
+    if (this._devices && !force) return;
     try {
       this._devices = await this._hass.callWS({ type: "ezviz_rtsp/devices" });
     } catch {
       this._devices = [];
     }
+    // The picture URL from this call is a short-lived signed URL, so forget the
+    // resolved device and pick it up fresh.
+    this._device = undefined;
     // Re-fill the header name/icon now that devices are known.
     if (this._state === "idle" && !this._video) this._render();
     this._syncBattery();
@@ -585,12 +595,10 @@ class EzvizVideoCard extends HTMLElement {
     this._render();
 
     const lang = this._lang;
-    // The device list carries the serial -> entity map and the fast MJPEG
-    // address; load it once so even an entity-configured card gets the fast path.
-    if (!this._devices) {
-      await this._loadDevices();
-      if (gen !== this._gen) return;
-    }
+    // Refresh the device list on every play: it carries the serial -> entity map
+    // and a freshly signed picture URL (the previous one may have expired).
+    await this._loadDevices(true);
+    if (gen !== this._gen) return;
     let entity = this._entityId();
     if (!entity) entity = this._findDevice()?.entity_id || null;
     if (!entity) {

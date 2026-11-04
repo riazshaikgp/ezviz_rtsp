@@ -130,7 +130,11 @@ The card shows the picture through the integration's **own fast picture stream**
 (a live MJPEG) so it appears a few seconds after the camera wakes, rather than
 waiting for Home Assistant's HLS to build segments. It falls back to HLS for a
 camera the integration does not stream itself. While the camera wakes, the card
-keeps its **last picture** on screen, so it never looks blank.
+keeps its **last picture** on screen, so it never looks blank. The picture is
+served from an **authenticated** view and the card reads it through a short-lived
+**signed URL**, so a link that leaks (or a user you later remove) cannot keep
+watching. **hls.js is bundled with the integration** and served from its own
+path — the card loads no code from a public CDN.
 
 The card waits up to 45 seconds for the camera to wake and send its first frame
 (a battery camera over the cloud relay is not instant); `max_seconds` only starts
@@ -200,9 +204,9 @@ addresses. The bundled card keeps working either way, because it uses its own
 separate token. Reading an address wakes the camera, so treat it like a doorbell:
 switch it on for a moment, then let it close.
 
-The same address also serves a **live MJPEG picture** — the endpoint the bundled
-card reads with its own token — handy for a plain `<img>` or a dashboard that
-wants a small, low-latency view:
+The same token serves a **live MJPEG picture** too — handy for a plain `<img>` or
+a dashboard that wants a small, low-latency view (the bundled card uses its own
+authenticated picture view instead):
 
 ```
 http://<your-ha>:8123/api/ezviz_rtsp/mjpeg/<serial>?token=<stream token>
@@ -225,9 +229,9 @@ A quick sketch, for the curious:
                               LiveStream (one per camera, shared)
                                     │
                 ┌───────────────────┴────────────────────┐
-     LiveStreamView (MPEG-TS)                  LiveMjpegView (live JPEG)
-      ├─ HA stream worker ──► HLS (H.264)         └─ the bundled card / a <img>
-      └─ other apps (go2rtc, Frigate …)
+     LiveStreamView (MPEG-TS)                  MJPEG views (live JPEG)
+      ├─ HA stream worker ──► HLS (H.264)      ├─ the bundled card (signed URL)
+      └─ other apps (go2rtc, Frigate …)        └─ a <img> (stream token, opt-in)
 ```
 
 The whole stream is opened lazily — the first thing that asks for it starts it,

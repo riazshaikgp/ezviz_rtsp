@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 import probatio as vol
+from homeassistant.components.http.auth import async_sign_path
 from homeassistant.components.websocket_api import async_register_command
 from homeassistant.components.websocket_api.connection import ActiveConnection
 from homeassistant.components.websocket_api.decorators import async_response, websocket_command
@@ -16,7 +17,8 @@ from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
-from .const import CONF_CODES, CONF_INTERNAL_TOKEN, DATA_WS, DOMAIN
+from .const import CONF_CODES, DATA_WS, DOMAIN
+from .live import CARD_MJPEG_TTL, card_mjpeg_path
 
 
 @callback
@@ -56,7 +58,6 @@ async def ws_get_devices(
     devices: list[dict[str, Any]] = []
     for entry in _loaded_entries(hass):
         codes = entry.options.get(CONF_CODES, {})
-        token = entry.options.get(CONF_INTERNAL_TOKEN)
         data = getattr(getattr(entry, "runtime_data", None), "data", None) or {}
         for serial, value in data.items():
             devices.append(
@@ -71,7 +72,12 @@ async def ws_get_devices(
                     "battery_entity_id": _battery_entity_id(registry, serial),
                     "entity_id": registry.async_get_entity_id("camera", DOMAIN, serial),
                     # The card drops this straight into an <img> for a fast start.
-                    "mjpeg_url": f"/api/{DOMAIN}/mjpeg/{serial}?token={token}" if token else None,
+                    # It is a short-lived signed URL to the authenticated picture
+                    # view, so it cannot be reused after it expires or the user
+                    # is removed.
+                    "mjpeg_url": async_sign_path(
+                        hass, card_mjpeg_path(serial), CARD_MJPEG_TTL
+                    ),
                 }
             )
     connection.send_result(msg["id"], devices)

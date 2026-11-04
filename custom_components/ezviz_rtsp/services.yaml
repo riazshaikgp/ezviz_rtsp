@@ -1,7 +1,7 @@
 set_alarm_detection_sensibility:
   target:
     entity:
-      integration: ezviz
+      integration: ezviz_rtsp
       domain: camera
   fields:
     level:
@@ -27,5 +27,5 @@ set_alarm_detection_sensibility:
 wake_device:
   target:
     entity:
-      integration: ezviz
+      integration: ezviz_rtsp
       domain: camera
