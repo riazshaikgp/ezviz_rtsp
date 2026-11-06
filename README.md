@@ -480,6 +480,10 @@ This project would not exist without two upstream works; their notices are in
 - The **`capture_picture` service and Snapshot image** follow
   [RenierM26/ha-ezviz#235](https://github.com/RenierM26/ha-ezviz/pull/235) by
   **[Michael Freund (@ottes)](https://github.com/ottes)**.
+- **On-demand snapshots** — the `capture_picture` service, the Snapshot image,
+  the EZVIZ Snapshot card and the Snapshots options — were contributed by
+  **[Riaz Shaik (@riazshaikgp)](https://github.com/riazshaikgp)** in
+  [tarasifua/ezviz_rtsp#1](https://github.com/tarasifua/ezviz_rtsp/pull/1).
 - Brand icon: the EZVIZ brand image from
   [home-assistant/brands](https://github.com/home-assistant/brands), with a
   small "video" badge.
