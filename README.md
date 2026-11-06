@@ -25,7 +25,9 @@ This integration talks to them the way the phone app does when you're on
 mobile data. It asks EZVIZ's cloud to wake the camera, pulls the stream down,
 and hands it to Home Assistant as a normal camera. You get a live view, a
 built-in Lovelace card, and the camera stays awake only while you're actually
-looking at it.
+looking at it. When a still is enough, it can also have the camera take a
+fresh picture on demand, or whenever a dashboard shows it (see
+[Fresh pictures on demand](#fresh-pictures-on-demand)).
 
 It is a fork of the **built-in** EZVIZ integration, so everything that one
 does still works here. It lives under its own domain, `ezviz_rtsp`, which means
@@ -90,6 +92,10 @@ neither Mushroom nor any other frontend add-on. The card finds a camera by its
 serial (or `entity`) and plays the integration's **own fast picture stream**,
 falling back to Home Assistant's stream only for a camera the integration does
 not stream itself.
+
+A second card, **EZVIZ Snapshot**, shows still pictures instead of video and
+can take a new one each time it comes into view; see
+[A snapshot whenever the dashboard is opened](#a-snapshot-whenever-the-dashboard-is-opened).
 
 ```yaml
 type: custom:ezviz-video-card
@@ -180,9 +186,68 @@ Everything below lives under **Configure** on the integration:
 - **Release the camera after** — how long the cloud stream is held open after the
   last viewer leaves, in seconds (default **10**; `0` releases it at once). A
   short hold means a quick re-play does not wake the camera again.
+- **Snapshots** — whether the **EZVIZ Snapshot** card may take a new picture
+  when it comes into view (*on by default*), and the minimum time between those
+  automatic pictures for one camera, in seconds (default **300**; `0` takes one
+  on every view), however many dashboards ask. Buttons and scripts that call
+  `capture_picture` are not affected. See
+  [Fresh pictures on demand](#fresh-pictures-on-demand).
 - **General** — request timeout and the ffmpeg arguments for cameras you added
   over local RTSP.
 - **Stream address for other apps** — see below.
+
+---
+
+## Fresh pictures on demand
+
+The camera picture shown on a dashboard is the last **alarm** picture, so a
+battery camera is never woken just to draw it. When you want a picture from
+*now*, call the **`ezviz_rtsp.capture_picture`** service on a camera:
+
+```yaml
+action: ezviz_rtsp.capture_picture
+target:
+  entity_id: camera.driveway_gate
+```
+
+The cloud wakes the camera and it takes a full-resolution picture (a few seconds
+on a battery camera; no RTSP needed). It appears in the camera's **Snapshot**
+image entity (`image.<camera>_snapshot`), and the service returns its
+`picture_url` if you ask for a response. Each call wakes the camera, so put it
+behind a button rather than a timer. The snapshot is kept in memory, so it is
+empty again after a restart until the next capture. A sleeping camera often
+answers the first request with EZVIZ error 2009 ("device network exception")
+while it wakes; the service then tries once more after 5 seconds, so such a
+call can take a few seconds longer.
+
+Pass `min_interval: <seconds>` to skip the capture when that camera took a
+picture more recently (the call then returns the last picture with
+`skipped: true`). The throttle is kept per camera in Home Assistant, so it holds
+however many dashboards or automations ask.
+
+### A snapshot whenever the dashboard is opened
+
+The integration also ships an **EZVIZ Snapshot** card:
+
+```yaml
+type: custom:ezviz-snapshot-card
+entity: camera.driveway_gate
+title: Driveway gate      # optional
+capture_on_load: true     # optional, off by default; take a picture when the card comes into view
+```
+
+It shows the camera's Snapshot image. Like the video card's `auto_play`,
+`capture_on_load` is **off by default**, so showing the card never wakes a
+battery camera unless you ask it to. With `capture_on_load: true` it asks for a
+new picture each time it comes into view: the dashboard view opens, or the
+browser tab or app comes back to the front. These automatic requests follow
+**Configure → Snapshots**:
+
+- **Take a snapshot when a dashboard shows the camera** — on by default; turn it
+  off and the cards only show the last picture (buttons and scripts calling
+  `capture_picture` still work).
+- **Minimum time between automatic snapshots** — 300 s by default, per camera,
+  however many dashboards ask. A card can override it with `min_interval`.
 
 ---
 
@@ -250,6 +315,10 @@ is expected to play here, but only testing will tell.
 Verified while building this: **DP2** (battery video doorbell), 2048×1296 H.265
 + AAC through the cloud relay.
 
+Also reported working: **CB3** (battery camera with solar panel; eight of them),
+1920×1080 live view through the cloud relay, and on-demand snapshots
+(`capture_picture`, 1920×1080) in about 2–5 s.
+
 If you try another model, an issue with the result is welcome.
 
 ---
@@ -304,6 +373,9 @@ This project would not exist without two upstream works; their notices are in
 - **[ezviz-cloud-hass](https://github.com/bvis/ezviz-cloud-hass)** — the
   cloud (VTM) live-view idea and code that this draws on. By
   **[Basilio Vera (@bvis)](https://github.com/bvis)**, under MIT.
+- The **`capture_picture` service and Snapshot image** follow
+  [RenierM26/ha-ezviz#235](https://github.com/RenierM26/ha-ezviz/pull/235) by
+  **[Michael Freund (@ottes)](https://github.com/ottes)**.
 - Brand icon: the EZVIZ brand image from
   [home-assistant/brands](https://github.com/home-assistant/brands), with a
   small "video" badge.

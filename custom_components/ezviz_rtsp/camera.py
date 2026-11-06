@@ -1,6 +1,8 @@
 """Support ezviz camera devices."""
 
+import asyncio
 import logging
+import time
 from typing import override
 
 import aiohttp
@@ -11,10 +13,12 @@ from homeassistant.components.ffmpeg import get_ffmpeg_manager
 from homeassistant.components.stream import CONF_USE_WALLCLOCK_AS_TIMESTAMPS
 from homeassistant.config_entries import SOURCE_IGNORE, SOURCE_INTEGRATION_DISCOVERY
 from homeassistant.const import CONF_IP_ADDRESS, CONF_PASSWORD, CONF_USERNAME
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant, ServiceResponse, SupportsResponse, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import discovery_flow
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import (
     AddConfigEntryEntitiesCallback,
     async_get_current_platform,
@@ -23,21 +27,56 @@ from pyezvizapi.exceptions import HTTPError, InvalidHost, PyEzvizError
 from pyezvizapi.utils import decrypt_image
 
 from .const import (
+    ATTR_AUTOMATIC,
     ATTR_LEVEL,
+    ATTR_MIN_INTERVAL,
     ATTR_SERIAL,
     ATTR_TYPE,
+    CONF_AUTO_SNAPSHOT,
     CONF_FFMPEG_ARGUMENTS,
+    CONF_SNAPSHOT_INTERVAL,
+    DEFAULT_AUTO_SNAPSHOT,
     DEFAULT_CAMERA_USERNAME,
     DEFAULT_FFMPEG_ARGUMENTS,
+    DEFAULT_SNAPSHOT_INTERVAL,
     DOMAIN,
+    SERVICE_CAPTURE_PICTURE,
     SERVICE_DETECTION_SENSITIVITY,
     SERVICE_WAKE_DEVICE,
+    SIGNAL_PICTURE_CAPTURED,
 )
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
 from .entity import EzvizEntity
 from .live import LiveStream, stream_source
 
+try:
+    # pyezvizapi's own parser for capture responses (used by EzvizClient.save_image); it accepts
+    # picUrl, picURL, imageUrl, captureUrl, ... It is private, so keep a fallback in case it moves.
+    from pyezvizapi.client import _first_image_url
+except ImportError:  # pragma: no cover
+
+    def _first_image_url(value: object) -> str | None:
+        info = value.get("captureInfo") if isinstance(value, dict) else None
+        url = info.get("picUrl") if isinstance(info, dict) else None
+        return url if isinstance(url, str) and url.startswith(("http://", "https://")) else None
+
+
 _LOGGER = logging.getLogger(__name__)
+
+# A sleeping battery camera often answers the first capture with EZVIZ meta.code 2009
+# ("device network exception") while it wakes; one retry after this long usually succeeds.
+CAPTURE_RETRY_DELAY = 5
+
+
+def _is_wake_timeout(err: Exception) -> bool:
+    """Whether a capture failed with EZVIZ meta.code 2009.
+
+    pyezvizapi reports API errors as PyEzvizError with the payload in the message
+    (``... Got {'meta': {'code': 2009, ...}}``), so the code is read from there.
+    (``max_retries`` on capture_picture only counts 401 re-logins, so it does not
+    cover this.)
+    """
+    return isinstance(err, PyEzvizError) and "'code': 2009" in str(err)
 
 
 def _is_battery_camera(data: dict) -> bool:
@@ -133,6 +172,15 @@ async def async_setup_entry(
         SERVICE_WAKE_DEVICE, None, "perform_wake_device"
     )
     platform.async_register_entity_service(
+        SERVICE_CAPTURE_PICTURE,
+        {
+            vol.Optional(ATTR_MIN_INTERVAL): cv.positive_int,
+            vol.Optional(ATTR_AUTOMATIC, default=False): cv.boolean,
+        },
+        "async_capture_picture",
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    platform.async_register_entity_service(
         SERVICE_DETECTION_SENSITIVITY,
         {
             vol.Required(ATTR_LEVEL): cv.positive_int,
@@ -174,6 +222,9 @@ class EzvizCamera(EzvizEntity, Camera):
         self._ffmpeg = get_ffmpeg_manager(hass)
         self._use_cloud = use_cloud
         self._live: LiveStream | None = coordinator.live_streams.get(serial)
+        # capture_picture throttle: when the last capture started (monotonic) and its picture
+        self._capture_started: float | None = None
+        self._capture_url: str | None = None
         self._attr_unique_id = serial
         if camera_password or use_cloud:
             self._attr_supported_features = CameraEntityFeature.STREAM
@@ -306,6 +357,76 @@ class EzvizCamera(EzvizEntity, Camera):
             self.coordinator.ezviz_client.get_detection_sensibility(self._serial)
         except (HTTPError, PyEzvizError) as err:
             raise PyEzvizError("Cannot wake device") from err
+
+    async def async_capture_picture(
+        self, min_interval: int | None = None, automatic: bool = False
+    ) -> ServiceResponse:
+        """Take a new picture through the EZVIZ cloud.
+
+        Works without RTSP and wakes battery cameras from standby. The picture is
+        shown by the camera's Snapshot image entity.
+
+        With ``min_interval`` (seconds), a call within that time of the last
+        capture of this camera (or while one is running) is skipped, so several
+        dashboards opening at once wake the camera only once. The skipped call
+        returns the last picture with ``skipped: true``.
+
+        ``automatic`` marks a request nobody explicitly asked for (the snapshot
+        card coming into view). It follows the entry's Snapshots options: it is
+        skipped when automatic snapshots are off, and without its own
+        ``min_interval`` it uses the configured one.
+        """
+        if automatic:
+            options = self.coordinator.config_entry.options
+            if not options.get(CONF_AUTO_SNAPSHOT, DEFAULT_AUTO_SNAPSHOT):
+                return {"picture_url": self._capture_url, "skipped": True}
+            if min_interval is None:
+                min_interval = int(
+                    options.get(CONF_SNAPSHOT_INTERVAL, DEFAULT_SNAPSHOT_INTERVAL)
+                )
+        min_interval = min_interval or 0
+        now = time.monotonic()
+        if (
+            min_interval
+            and self._capture_started is not None
+            and now - self._capture_started < min_interval
+        ):
+            return {"picture_url": self._capture_url, "skipped": True}
+        started = self._capture_started
+        self._capture_started = now
+        client = self.coordinator.ezviz_client
+        try:
+            try:
+                result = await self.hass.async_add_executor_job(
+                    client.capture_picture, self._serial, 1
+                )
+            except PyEzvizError as err:
+                if not _is_wake_timeout(err):
+                    raise
+                _LOGGER.debug(
+                    "%s was still waking (EZVIZ 2009); retrying the capture in %s s",
+                    self._serial,
+                    CAPTURE_RETRY_DELAY,
+                )
+                await asyncio.sleep(CAPTURE_RETRY_DELAY)
+                result = await self.hass.async_add_executor_job(
+                    client.capture_picture, self._serial, 1
+                )
+        except (HTTPError, PyEzvizError) as err:
+            # a failed capture must not hold off the next try
+            self._capture_started = started
+            raise HomeAssistantError(f"Cannot capture picture: {err}") from err
+
+        pic_url = _first_image_url(result)
+        if not pic_url:
+            self._capture_started = started
+            raise HomeAssistantError("EZVIZ returned no picture url")
+
+        self._capture_url = pic_url
+        async_dispatcher_send(
+            self.hass, SIGNAL_PICTURE_CAPTURED.format(self._serial), pic_url
+        )
+        return {"picture_url": pic_url, "skipped": False}
 
     def set_alarm_detection_sensibility(
         self, level: int, type_value: int = 0
