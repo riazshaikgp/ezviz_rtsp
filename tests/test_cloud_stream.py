@@ -686,6 +686,7 @@ async def test_options_menu_and_video_step() -> None:
         "general",
         "stream",
         "release",
+        "snapshots",
         "stream_address",
         "video",
         "codes",

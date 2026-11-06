@@ -39,6 +39,16 @@ The file custom_components/ezviz_rtsp/frontend/hls.min.js is the unmodified
 hls.js v1.5.20 build, bundled so the Lovelace card never loads code from a public
 CDN. Its license text is kept next to it in frontend/hls.min.js.LICENSE.txt.
 
+4. RenierM26/ha-ezviz — capture_picture service and Snapshot image
+------------------------------------------------------------------
+Source: https://github.com/RenierM26/ha-ezviz/pull/235
+Author: Michael Freund (@ottes)
+
+The capture_picture camera service and the Snapshot image entity in
+custom_components/ezviz_rtsp/camera.py and image.py are adapted from that pull
+request (GPL-3.0). Its author has given permission for that code to be included
+in this Apache-2.0 project (see tarasifua/ezviz_rtsp#1).
+
 --------------------------------------------------------------------------
 MIT License (for the ezviz-cloud-hass derived parts)
 
