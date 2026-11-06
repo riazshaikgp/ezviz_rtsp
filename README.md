@@ -421,7 +421,7 @@ These two models have been tested end to end:
 | Model | What it is | What was checked |
 |---|---|---|
 | **DP2** | battery video doorbell | Live view at **2048×1296** (H.265 + AAC) through the cloud relay. Verified by the maintainer while building this. |
-| **CB3** | battery camera with solar panel | Live view at **1920×1080** through the cloud relay, and on-demand snapshots (`capture_picture`, 1920×1080) in about **2–5 s**. Tested by **[Riaz Shaik (@riazshaikgp)](https://github.com/riazshaikgp)** on a setup with **eight CB3s** (seven online at once), including parallel captures and the dashboard refreshing on open; one slow-wake camera needed the 2009 retry. See [PR #1](https://github.com/tarasifua/ezviz_rtsp/pull/1). |
+| **CB3** | battery camera with solar panel | Live view at **1920×1080** through the cloud relay, and on-demand snapshots (`capture_picture`, 1920×1080) in about **2–5 s**. Tested by **[Riaz Shaik (@riazshaikgp)](https://github.com/riazshaikgp)** on a setup with **eight CB3s**. See [PR #1](https://github.com/tarasifua/ezviz_rtsp/pull/1). |
 
 If you try another model, an issue with the result is welcome.
 
