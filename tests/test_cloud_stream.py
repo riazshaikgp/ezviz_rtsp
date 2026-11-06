@@ -83,6 +83,7 @@ def _coordinator() -> MagicMock:
     }
     coordinator.live_streams = {}
     coordinator.ezviz_client = MagicMock()
+    coordinator.snapshot_captures = {}
     return coordinator
 
 
@@ -774,14 +775,17 @@ async def test_capture_picture_returns_the_url_and_notifies_the_snapshot() -> No
     send.assert_called_once()
     assert send.call_args.args[1] == SIGNAL_PICTURE_CAPTURED.format("BK1")
     assert send.call_args.args[2] == "https://ezviz/pic.jpg"
-    assert camera._capture_started is not None
-    assert camera._capture_url == "https://ezviz/pic.jpg"
+    started, url = coordinator.snapshot_captures["BK1"]
+    assert started is not None
+    assert url == "https://ezviz/pic.jpg"
 
 
 async def test_capture_picture_is_skipped_inside_min_interval() -> None:
     camera, coordinator = _capture_camera()
-    camera._capture_started = time.monotonic()
-    camera._capture_url = "https://ezviz/old.jpg"
+    coordinator.snapshot_captures["BK1"] = (
+        time.monotonic(),
+        "https://ezviz/old.jpg",
+    )
 
     result = await camera.async_capture_picture(min_interval=300)
 
@@ -794,8 +798,10 @@ async def test_capture_picture_runs_again_after_min_interval() -> None:
     coordinator.ezviz_client.capture_picture.return_value = {
         "captureInfo": {"picUrl": "https://ezviz/new.jpg"}
     }
-    camera._capture_started = time.monotonic() - 400
-    camera._capture_url = "https://ezviz/old.jpg"
+    coordinator.snapshot_captures["BK1"] = (
+        time.monotonic() - 400,
+        "https://ezviz/old.jpg",
+    )
 
     result = await camera.async_capture_picture(min_interval=300)
 
@@ -829,7 +835,7 @@ async def test_capture_picture_other_errors_raise_and_release_the_throttle() -> 
 
     assert coordinator.ezviz_client.capture_picture.call_count == 1
     # A failed capture must not hold off the next try.
-    assert camera._capture_started is None
+    assert coordinator.snapshot_captures.get("BK1", (None, None))[0] is None
 
 
 async def test_capture_picture_without_a_url_raises() -> None:
@@ -839,15 +845,16 @@ async def test_capture_picture_without_a_url_raises() -> None:
     with pytest.raises(HomeAssistantError, match="no picture url"):
         await camera.async_capture_picture()
 
-    assert camera._capture_started is None
+    assert coordinator.snapshot_captures.get("BK1", (None, None))[0] is None
 
 
 async def test_capture_picture_automatic_obeys_the_master_switch() -> None:
     camera, coordinator = _capture_camera({"auto_snapshot": False})
+    coordinator.snapshot_captures["BK1"] = (None, "https://ezviz/last.jpg")
 
     result = await camera.async_capture_picture(automatic=True)
 
-    assert result == {"picture_url": None, "skipped": True}
+    assert result == {"picture_url": "https://ezviz/last.jpg", "skipped": True}
     coordinator.ezviz_client.capture_picture.assert_not_called()
 
 
@@ -855,8 +862,10 @@ async def test_capture_picture_automatic_uses_the_configured_interval() -> None:
     camera, coordinator = _capture_camera(
         {"auto_snapshot": True, "snapshot_interval": 300}
     )
-    camera._capture_started = time.monotonic() - 100
-    camera._capture_url = "https://ezviz/recent.jpg"
+    coordinator.snapshot_captures["BK1"] = (
+        time.monotonic() - 100,
+        "https://ezviz/recent.jpg",
+    )
 
     result = await camera.async_capture_picture(automatic=True)
 
@@ -874,6 +883,60 @@ async def test_capture_picture_explicit_call_ignores_the_master_switch() -> None
 
     assert result["skipped"] is False
     coordinator.ezviz_client.capture_picture.assert_called_once_with("BK1", 1)
+
+
+async def test_snapshot_button_takes_a_picture_and_updates_the_state() -> None:
+    from custom_components.ezviz_rtsp.button import EzvizSnapshotButton
+
+    hass = _hass()
+    coordinator = _coordinator()
+    coordinator.ezviz_client.capture_picture.return_value = {
+        "captureInfo": {"picUrl": "https://ezviz/pic.jpg"}
+    }
+    button = EzvizSnapshotButton(coordinator, "BK1")
+    button.hass = hass
+
+    with patch("custom_components.ezviz_rtsp.camera.async_dispatcher_send") as send:
+        await button.async_press()
+
+    coordinator.ezviz_client.capture_picture.assert_called_once_with("BK1", 1)
+    assert coordinator.snapshot_captures["BK1"][1] == "https://ezviz/pic.jpg"
+    send.assert_called_once_with(
+        hass, SIGNAL_PICTURE_CAPTURED.format("BK1"), "https://ezviz/pic.jpg"
+    )
+
+
+async def test_snapshot_button_marks_the_throttle_for_automatic_requests() -> None:
+    from custom_components.ezviz_rtsp.button import EzvizSnapshotButton
+
+    hass = _hass()
+    coordinator = _coordinator()
+    coordinator.config_entry.options = {
+        "auto_snapshot": True,
+        "snapshot_interval": 300,
+    }
+    coordinator.ezviz_client.capture_picture.return_value = {
+        "captureInfo": {"picUrl": "https://ezviz/pic.jpg"}
+    }
+    button = EzvizSnapshotButton(coordinator, "BK1")
+    button.hass = hass
+    await button.async_press()
+
+    # A dashboard opening right after the button must not wake the camera again.
+    camera = _cloud_camera(coordinator, hass)
+    result = await camera.async_capture_picture(automatic=True)
+
+    assert result == {"picture_url": "https://ezviz/pic.jpg", "skipped": True}
+    coordinator.ezviz_client.capture_picture.assert_called_once_with("BK1", 1)
+
+
+def test_snapshot_button_is_present_for_every_camera() -> None:
+    from custom_components.ezviz_rtsp.button import EzvizSnapshotButton
+
+    coordinator = _coordinator()
+    button = EzvizSnapshotButton(coordinator, "BK1")
+    assert button.unique_id == "BK1_request_snapshot"
+    assert button.translation_key == "request_snapshot"
 
 
 def test_first_image_url_accepts_the_known_keys() -> None:

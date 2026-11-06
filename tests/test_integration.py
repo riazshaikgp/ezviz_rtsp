@@ -32,6 +32,7 @@ CAM_DATA = {
         "battery_camera_work_mode": 5,
         "supported_channels": 1,
         "encrypted": False,
+        "supportExt": {},
     }
 }
 
@@ -54,6 +55,9 @@ class _FakeClient:
 
     def get_detection_sensibility(self, _serial) -> None:
         return None
+
+    def capture_picture(self, _serial, _channel) -> dict:
+        return {}
 
 
 @pytest.fixture(autouse=True)
@@ -79,12 +83,12 @@ async def _setup(hass) -> MockConfigEntry:
         unique_id="owner@example.com",
     )
     entry.add_to_hass(hass)
-    # Only the camera platform: the cloud stream is what this fork adds.
+    # Only the platforms this fork adds to: the camera and its button.
     with (
         patch("custom_components.ezviz_rtsp.EzvizClient", _FakeClient),
         patch.dict(
             "custom_components.ezviz_rtsp.PLATFORMS_BY_TYPE",
-            {ATTR_TYPE_CLOUD: [Platform.CAMERA]},
+            {ATTR_TYPE_CLOUD: [Platform.CAMERA, Platform.BUTTON, Platform.IMAGE]},
         ),
         patch("custom_components.ezviz_rtsp.camera.get_ffmpeg_manager"),
     ):
@@ -116,6 +120,11 @@ async def test_battery_camera_sets_up_and_offers_a_cloud_stream(hass) -> None:
     assert entry.options["internal_token"]
     assert hass.data[DATA_LIVE_VIEW] is True
 
+    # The camera gets a Request snapshot button in Controls, even without PTZ.
+    button_ids = hass.states.async_entity_ids("button")
+    assert len(button_ids) == 1, button_ids
+    assert button_ids[0].endswith("_request_snapshot")
+
     # A battery camera must not trigger the RTSP discovery flow.
     assert hass.config_entries.flow.async_progress() == []
 
@@ -144,6 +153,33 @@ async def test_battery_camera_sets_up_and_offers_a_cloud_stream(hass) -> None:
     # Both integration services are registered (wake + detection sensitivity).
     assert hass.services.has_service(DOMAIN, "wake_device")
     assert hass.services.has_service(DOMAIN, "set_alarm_detection_sensibility")
+
+
+async def test_request_snapshot_button_updates_the_snapshot_image(hass) -> None:
+    await _setup(hass)
+    snapshot_id = next(
+        entity for entity in hass.states.async_entity_ids("image") if entity.endswith("_snapshot")
+    )
+    assert hass.states.get(snapshot_id).state == "unknown"
+    button_id = next(
+        entity
+        for entity in hass.states.async_entity_ids("button")
+        if entity.endswith("_request_snapshot")
+    )
+
+    with patch.object(
+        _FakeClient,
+        "capture_picture",
+        return_value={"captureInfo": {"picUrl": "https://ezviz/pic.jpg"}},
+    ):
+        await hass.services.async_call(
+            "button", "press", {"entity_id": button_id}, blocking=True
+        )
+        await hass.async_block_till_done()
+
+    state = hass.states.get(snapshot_id)
+    assert state.state != "unknown"
+    assert state.attributes.get("entity_picture")
 
 
 async def test_card_file_is_served(hass, hass_client) -> None:

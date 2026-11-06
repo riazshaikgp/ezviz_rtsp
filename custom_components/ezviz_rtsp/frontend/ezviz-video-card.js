@@ -9,6 +9,11 @@
 //   icon: mdi:doorbell     # optional
 //   auto_play: false       # optional; play while the card is on screen
 //   max_seconds: 60        # optional; stop to save battery, 0 = never
+//   capture_on_load: false # optional; request a fresh snapshot when the card appears
+//   picture: motion        # optional; what the idle picture shows: motion, snapshot or newest
+//   hide_play: false       # optional; hide the play chip
+//   hide_stop: false       # optional; hide the stop chip
+//   hide_snapshot: false   # optional; hide the snapshot chip
 //
 // The card shows the camera's live picture from the integration's own stream:
 // its fast MJPEG path (an <img> that appears a few seconds after the camera
@@ -81,8 +86,18 @@ const STRINGS = /* translations */ {
     "serial": "Camera",
     "title": "Title",
     "icon": "Icon",
-    "auto_play": "Start automatically",
-    "max_seconds": "Stop after (seconds, 0 = never)"
+    "auto_play": "Play video automatically",
+    "max_seconds": "Stop video playback after (seconds, 0 = never)",
+    "capture_on_load": "Take a snapshot when the card opens",
+    "picture": "Picture while not playing",
+    "picture_helper": "If no snapshots are available, the mode shows the previous frame with motion. The \"whichever is newer\" option compares both frames and displays the newest one.",
+    "picture_motion": "Last motion photo",
+    "picture_snapshot": "Last snapshot (motion photo until one exists)",
+    "picture_newest": "Whichever is newer",
+    "snapshot": "Snapshot",
+    "hide_play": "Hide the play button",
+    "hide_stop": "Hide the stop button",
+    "hide_snapshot": "Hide the snapshot button"
   },
   "uk": {
     "play": "Дивитися",
@@ -98,8 +113,18 @@ const STRINGS = /* translations */ {
     "serial": "Камера",
     "title": "Заголовок",
     "icon": "Іконка",
-    "auto_play": "Запускати автоматично",
-    "max_seconds": "Зупиняти через (секунд, 0 = ніколи)"
+    "auto_play": "Відтворювати відео автоматично",
+    "max_seconds": "Зупиняти відтворення відео через (секунд, 0 = ніколи)",
+    "capture_on_load": "Робити снапшот при відкритті картки",
+    "picture": "Що показувати, коли відео не грає",
+    "picture_helper": "Якщо снапшотів немає, режим показує попередній кадр із рухом. А опція «що новіше» порівнює їх між собою та показує найсвіжіший.",
+    "picture_motion": "Останнє фото з рухом",
+    "picture_snapshot": "Останній снапшот (поки немає — фото з рухом)",
+    "picture_newest": "Що новіше",
+    "snapshot": "Снапшот",
+    "hide_play": "Приховати кнопку відтворення",
+    "hide_stop": "Приховати кнопку зупинки",
+    "hide_snapshot": "Приховати кнопку снапшота"
   }
 } /* end translations */;
 
@@ -192,9 +217,18 @@ const style = /* css */ `
     backdrop-filter: blur(4px);
   }
   .chip.play, .chip.stop { right: 8px; bottom: 8px; }
+  .chip.snapshot { left: 8px; bottom: 8px; }
   .chip.play { color: #fff; background: color-mix(in srgb, var(--primary-color) 85%, #000); }
   .chip.play:hover { background: var(--primary-color); }
   .chip:hover { background: color-mix(in srgb, #000 70%, transparent); }
+  .chip.busy { cursor: progress; opacity: 0.75; }
+  .chip.busy ha-icon { display: none; }
+  .chip.busy::before {
+    content: ""; width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.35); border-top-color: #fff;
+    animation: chipspin 900ms linear infinite;
+  }
+  @keyframes chipspin { to { transform: rotate(360deg); } }
 
   .spinner {
     position: absolute; right: 10px; bottom: 10px; z-index: 2;
@@ -222,6 +256,17 @@ class EzvizVideoCard extends HTMLElement {
     this._startupTimer = null;
     // A pause the user asked for (video controls) must not be auto-undone.
     this._userPaused = false;
+    // An automatic snapshot request is in flight; don't stack them up.
+    this._capturing = false;
+    // A press on the card's own snapshot chip is in flight.
+    this._snapshotting = false;
+    this._snapshotChipEl = null;
+    // Idle-picture entities (motion and snapshot) resolved from the registry.
+    this._images = {};
+    this._imagesFrom = undefined;
+    this._imagesCam = undefined;
+    this._posterShown = undefined;
+    this._posterEl = null;
   }
 
   static getStubConfig() {
@@ -236,15 +281,30 @@ class EzvizVideoCard extends HTMLElement {
     if (!config || (!config.serial && !config.entity)) {
       throw new Error("ezviz-video-card: 'serial' (or 'entity') is required");
     }
-    // Play is off by default: the card shows the camera's last picture and waits
-    // for a tap, so opening the dashboard never wakes a battery camera.
-    this._config = { max_seconds: 60, auto_play: false, ...config };
+    // Play, snapshots and waking the camera are all off by default: the card
+    // shows the camera's last picture and waits for a tap, so opening the
+    // dashboard never wakes a battery camera.
+    this._config = {
+      max_seconds: 60,
+      auto_play: false,
+      capture_on_load: false,
+      picture: "motion",
+      hide_play: false,
+      hide_stop: false,
+      hide_snapshot: false,
+      ...config,
+    };
     this._device = undefined;
+    this._images = {};
+    this._imagesFrom = undefined;
+    this._imagesCam = undefined;
+    this._posterShown = undefined;
     this._stop();
     this._state = "idle";
     this._message = "";
     this._render();
     this._maybeAutoPlay();
+    if (this._visible) this._maybeCapture();
   }
 
   set hass(hass) {
@@ -258,6 +318,7 @@ class EzvizVideoCard extends HTMLElement {
       if (!this._video && this._state !== "loading") this._render();
     }
     this._syncBattery();
+    this._syncPoster();
   }
 
   getCardSize() {
@@ -276,6 +337,7 @@ class EzvizVideoCard extends HTMLElement {
     queueMicrotask(() => {
       if (this.isConnected) return;
       this._unwatchVisibility();
+      this._visible = false;
       this._stop(true);
     });
   }
@@ -351,7 +413,33 @@ class EzvizVideoCard extends HTMLElement {
   }
 
   _onShown() {
+    this._maybeCapture();
     this._ensurePlaying();
+  }
+
+  // A fresh snapshot on open, for the idle picture. The service is marked
+  // automatic, so Configure → Snapshots decides whether it may run and the
+  // server keeps the minimum time between pictures per camera — several open
+  // dashboards still wake a camera only once per interval.
+  async _maybeCapture() {
+    if (!this._config?.capture_on_load || this._capturing || !this._hass) return;
+    const entity = this._entityId();
+    if (!entity) return;
+    const cam = this._hass.states[entity];
+    if (!cam || cam.state === "unavailable" || cam.state === "unknown") return;
+    this._capturing = true;
+    try {
+      await this._hass.callService(
+        "ezviz_rtsp",
+        "capture_picture",
+        { automatic: true },
+        { entity_id: entity }
+      );
+    } catch (err) {
+      console.debug(`[ezviz-video-card] ${entity}: ${err?.message || err}`);
+    } finally {
+      this._capturing = false;
+    }
   }
 
   _ensurePlaying() {
@@ -381,7 +469,7 @@ class EzvizVideoCard extends HTMLElement {
   _findDevice() {
     if (this._device !== undefined) return this._device;
     if (!this._devices) return null;
-    const { serial, entity } = this._config;
+    const { serial, entity } = this._config || {};
     this._device =
       this._devices.find((d) => (serial && d.serial === serial) || (entity && d.entity_id === entity)) ||
       null;
@@ -389,7 +477,7 @@ class EzvizVideoCard extends HTMLElement {
   }
 
   _entityId() {
-    return this._config.entity || this._findDevice()?.entity_id || null;
+    return this._config?.entity || this._findDevice()?.entity_id || null;
   }
 
   _name() {
@@ -404,13 +492,111 @@ class EzvizVideoCard extends HTMLElement {
     );
   }
 
-  _posterUrl() {
-    const id = this._entityId();
-    if (!id) return "";
-    const state = this._hass?.states?.[id];
+  // The image entity the integration made for a camera: "last_motion_image"
+  // (the camera's own picture) or "snapshot" (capture_picture). The scan over
+  // the entity registry runs only when the registry object or camera changes.
+  _imageId(kind) {
+    const entities = this._hass?.entities;
+    const camId = this._entityId();
+    if (!entities || !camId) return undefined;
+    if (entities !== this._imagesFrom || camId !== this._imagesCam) {
+      this._imagesFrom = entities;
+      this._imagesCam = camId;
+      this._images = {};
+    }
+    if (kind in this._images) return this._images[kind];
+    const cam = entities[camId];
+    const match = cam?.device_id && Object.values(entities).find(
+      (e) => e.device_id === cam.device_id && e.entity_id.startsWith("image.") &&
+        (e.translation_key === kind || e.entity_id.endsWith(`_${kind}`))
+    );
+    this._images[kind] = match ? match.entity_id : undefined;
+    return this._images[kind];
+  }
+
+  _timeOf(state) {
+    const parsed = Date.parse(state?.state);
+    if (!Number.isNaN(parsed)) return parsed;
+    const updated = Date.parse(state?.last_updated);
+    return Number.isNaN(updated) ? 0 : updated;
+  }
+
+  _picture(kind) {
+    const id = this._imageId(kind);
+    const state = id ? this._hass?.states?.[id] : undefined;
     const pic = state?.attributes?.entity_picture;
-    if (!pic) return "";
-    return new URL(pic, window.location.origin).toString();
+    if (pic) {
+      return {
+        url: new URL(pic, window.location.origin).toString(),
+        ts: this._timeOf(state),
+        stamp: state.state,
+        entity: id,
+      };
+    }
+    // The camera's own picture is its last motion photo; it is still there when
+    // no separate motion image entity was created.
+    if (kind === "last_motion_image") {
+      const cam = this._hass?.states?.[this._entityId()];
+      const camPic = cam?.attributes?.entity_picture;
+      if (camPic) {
+        return {
+          url: new URL(camPic, window.location.origin).toString(),
+          ts: 0,
+          stamp: "",
+          entity: this._entityId(),
+        };
+      }
+    }
+    return undefined;
+  }
+
+  // The idle picture: the last motion photo (default), the last snapshot, or
+  // whichever of the two is newer.
+  _poster() {
+    const mode = this._config?.picture || "motion";
+    const motion = this._picture("last_motion_image");
+    const snapshot = this._picture("snapshot");
+    // With no snapshot yet, fall back to the last motion photo rather than a
+    // blank card; the editor says so next to the option.
+    if (mode === "snapshot") return snapshot || motion;
+    if (mode === "newest") {
+      if (!snapshot) return motion;
+      if (!motion) return snapshot;
+      return snapshot.ts > motion.ts ? snapshot : motion;
+    }
+    return motion || snapshot;
+  }
+
+  _posterUrl() {
+    const picture = this._poster();
+    if (!picture?.url) return "";
+    // The image proxy URL can stay the same between pictures; add the picture's
+    // timestamp so a fresh one is never served from the browser cache.
+    const sep = picture.url.includes("?") ? "&" : "?";
+    return picture.stamp
+      ? `${picture.url}${sep}s=${encodeURIComponent(picture.stamp)}`
+      : picture.url;
+  }
+
+  // Update the picture in place, without re-rendering the card (a capture can
+  // land while the card is idle, and the whole card must not blink).
+  _syncPoster() {
+    if (!this._config) return;
+    const url = this._posterUrl();
+    if (url === this._posterShown) return;
+    this._posterShown = url;
+    if (!this._media) return;
+    if (!url) {
+      this._posterEl?.remove();
+      this._posterEl = null;
+      return;
+    }
+    if (!this._posterEl) {
+      this._posterEl = document.createElement("div");
+      this._posterEl.className = "poster";
+      this._media.prepend(this._posterEl);
+    }
+    this._posterEl.style.backgroundImage = `url("${url}")`;
   }
 
   _batteryEntity() {
@@ -495,17 +681,22 @@ class EzvizVideoCard extends HTMLElement {
     media.className = "media";
     this._media = media;
 
+    this._posterEl = null;
     const poster = this._posterUrl();
     if (poster) {
       const layer = document.createElement("div");
       layer.className = "poster";
       layer.style.backgroundImage = `url("${poster}")`;
       media.appendChild(layer);
+      this._posterEl = layer;
     }
+    this._posterShown = poster;
 
+    this._snapshotChipEl = null;
     if (this._state === "playing" && this._video) {
       media.appendChild(this._video); // re-attach the running element
-      media.appendChild(this._stopChip());
+      if (!this._config.hide_stop) media.appendChild(this._stopChip());
+      if (!this._config.hide_snapshot) media.appendChild(this._snapshotChip());
     } else if (this._state === "loading") {
       // Show the last picture right away, with a small spinner in the corner -
       // the camera can take a few seconds to wake, and a blank card looks broken.
@@ -513,9 +704,10 @@ class EzvizVideoCard extends HTMLElement {
       spinner.className = "spinner";
       media.appendChild(spinner);
     } else {
-      // A small Mushroom-style chip in the corner, not a big circle over the
-      // picture: the card stays a picture with one clear control.
-      media.appendChild(this._playChip());
+      // Small Mushroom-style chips in the corners, not big circles over the
+      // picture: the card stays a picture with clear controls.
+      if (!this._config.hide_play) media.appendChild(this._playChip());
+      if (!this._config.hide_snapshot) media.appendChild(this._snapshotChip());
       if (this._message) {
         const message = document.createElement("div");
         message.className = "message";
@@ -571,6 +763,55 @@ class EzvizVideoCard extends HTMLElement {
       this._play();
     });
     return play;
+  }
+
+  _snapshotChip() {
+    const chip = document.createElement("button");
+    chip.className = "chip snapshot" + (this._snapshotting ? " busy" : "");
+    chip.title = t(this._lang, "snapshot");
+    // A serial-only card knows its camera entity once the device list loads;
+    // until then there is nothing to call the service on.
+    chip.disabled = this._snapshotting || !this._entityId();
+    const icon = document.createElement("ha-icon");
+    icon.setAttribute("icon", "mdi:camera");
+    icon.style.setProperty("--mdc-icon-size", "14px");
+    const label = document.createElement("span");
+    label.textContent = t(this._lang, "snapshot");
+    chip.append(icon, label);
+    chip.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this._requestSnapshot();
+    });
+    this._snapshotChipEl = chip;
+    return chip;
+  }
+
+  // The card's own snapshot button: an explicit request, so the Snapshots
+  // master switch does not apply, but a press still starts the per-camera
+  // throttle window (see async_request_snapshot in the integration).
+  async _requestSnapshot() {
+    if (this._snapshotting || !this._hass) return;
+    const entity = this._entityId();
+    if (!entity) return;
+    this._snapshotting = true;
+    this._snapshotChipEl?.classList.add("busy");
+    if (this._snapshotChipEl) this._snapshotChipEl.disabled = true;
+    try {
+      await this._hass.callService(
+        "ezviz_rtsp",
+        "capture_picture",
+        {},
+        { entity_id: entity }
+      );
+    } catch (err) {
+      console.debug(`[ezviz-video-card] ${entity}: ${err?.message || err}`);
+    } finally {
+      this._snapshotting = false;
+      if (this._snapshotChipEl?.isConnected) {
+        this._snapshotChipEl.classList.remove("busy");
+        this._snapshotChipEl.disabled = false;
+      }
+    }
   }
 
   // -- playback ------------------------------------------------------------
@@ -822,16 +1063,35 @@ class EzvizVideoCardEditor extends HTMLElement {
       { name: "title", selector: { text: {} } },
       { name: "icon", selector: { icon: {} } },
       { name: "auto_play", selector: { boolean: {} } },
+      { name: "capture_on_load", selector: { boolean: {} } },
       {
         name: "max_seconds",
         selector: { number: { min: 0, max: 600, mode: "box", unit_of_measurement: "s" } },
       },
+      {
+        name: "picture",
+        selector: {
+          select: {
+            mode: "dropdown",
+            options: [
+              { value: "motion", label: t(lang, "picture_motion") },
+              { value: "snapshot", label: t(lang, "picture_snapshot") },
+              { value: "newest", label: t(lang, "picture_newest") },
+            ],
+          },
+        },
+      },
+      { name: "hide_play", selector: { boolean: {} } },
+      { name: "hide_stop", selector: { boolean: {} } },
+      { name: "hide_snapshot", selector: { boolean: {} } },
     ];
     const form = document.createElement("ha-form");
     form.hass = this._hass;
     form.data = this._config;
     form.schema = schema;
     form.computeLabel = (field) => t(lang, field.name);
+    form.computeHelper = (field) =>
+      field.name === "picture" ? t(lang, "picture_helper") : "";
     form.addEventListener("value-changed", (event) => {
       this._config = event.detail.value;
       this.dispatchEvent(
@@ -910,6 +1170,7 @@ class EzvizSnapshotCard extends HTMLElement {
   set hass(hass) {
     const old = this._hass;
     this._hass = hass;
+    if (!this._config) return;
     const image = this._imageEntity();
     if (!old || !image || old.states[image] !== hass.states[image] ||
         old.states[this._config.entity] !== hass.states[this._config.entity]) {
@@ -923,6 +1184,17 @@ class EzvizSnapshotCard extends HTMLElement {
 
   connectedCallback() {
     if (!this._visTimer) this._visTimer = setInterval(() => this._syncVisibility(), 1000);
+    if (!this._io && "IntersectionObserver" in window) {
+      // Scrolled-off cards must not count as "the dashboard shows the camera".
+      this._io = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) this._intersecting = entry.isIntersecting;
+          this._syncVisibility();
+        },
+        { threshold: 0 }
+      );
+      this._io.observe(this);
+    }
     if (!this._onDocVisibility) {
       this._onDocVisibility = () => this._syncVisibility();
       document.addEventListener("visibilitychange", this._onDocVisibility);
@@ -935,6 +1207,8 @@ class EzvizSnapshotCard extends HTMLElement {
       if (this.isConnected) return;
       clearInterval(this._visTimer);
       this._visTimer = null;
+      this._io?.disconnect();
+      this._io = null;
       if (this._onDocVisibility) {
         document.removeEventListener("visibilitychange", this._onDocVisibility);
         this._onDocVisibility = null;
@@ -966,6 +1240,7 @@ class EzvizSnapshotCard extends HTMLElement {
   // not: the card's view being open is what "loaded" means here.
   _isVisible() {
     if (!this.isConnected || document.hidden) return false;
+    if (this._intersecting === false) return false;
     const rect = this.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return false;
     const style = getComputedStyle(this);

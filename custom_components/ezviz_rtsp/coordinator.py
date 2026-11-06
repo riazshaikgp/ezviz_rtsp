@@ -44,6 +44,11 @@ class EzvizDataUpdateCoordinator(DataUpdateCoordinator):
         self._api_timeout = api_timeout
         # Cloud live streams per serial, for cameras with no local RTSP.
         self.live_streams: dict[str, LiveStream] = {}
+        # capture_picture throttle per serial: (when the last capture started,
+        # its picture URL). Shared by the camera service, the Snapshot button
+        # and the cards' automatic requests, so a press followed by a dashboard
+        # opening does not wake the camera twice.
+        self.snapshot_captures: dict[str, tuple[float | None, str | None]] = {}
         update_interval = timedelta(seconds=30)
 
         super().__init__(

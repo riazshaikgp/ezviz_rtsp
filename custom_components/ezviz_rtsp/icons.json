@@ -12,6 +12,9 @@
       },
       "ptz_up": {
         "default": "mdi:pan"
+      },
+      "request_snapshot": {
+        "default": "mdi:camera"
       }
     },
     "image": {

@@ -91,6 +91,59 @@ def _is_battery_camera(data: dict) -> bool:
     )
 
 
+async def async_request_snapshot(
+    hass: HomeAssistant,
+    coordinator: EzvizDataUpdateCoordinator,
+    serial: str,
+    *,
+    min_interval: int = 0,
+) -> ServiceResponse:
+    """Take a picture through the EZVIZ cloud and announce it to the image entities.
+
+    Shared by the ``capture_picture`` camera service and the Snapshot button.
+    ``min_interval`` (seconds) skips the call when this camera took a picture
+    that recently; the throttle is kept on the coordinator, so both entry points
+    share it. A sleeping camera that answers with EZVIZ 2009 is retried once.
+    """
+    started, last_url = coordinator.snapshot_captures.get(serial, (None, None))
+    now = time.monotonic()
+    if min_interval and started is not None and now - started < min_interval:
+        return {"picture_url": last_url, "skipped": True}
+
+    coordinator.snapshot_captures[serial] = (now, last_url)
+    client = coordinator.ezviz_client
+    try:
+        try:
+            result = await hass.async_add_executor_job(
+                client.capture_picture, serial, 1
+            )
+        except PyEzvizError as err:
+            if not _is_wake_timeout(err):
+                raise
+            _LOGGER.debug(
+                "%s was still waking (EZVIZ 2009); retrying the capture in %s s",
+                serial,
+                CAPTURE_RETRY_DELAY,
+            )
+            await asyncio.sleep(CAPTURE_RETRY_DELAY)
+            result = await hass.async_add_executor_job(
+                client.capture_picture, serial, 1
+            )
+    except (HTTPError, PyEzvizError) as err:
+        # a failed capture must not hold off the next try
+        coordinator.snapshot_captures[serial] = (started, last_url)
+        raise HomeAssistantError(f"Cannot capture picture: {err}") from err
+
+    pic_url = _first_image_url(result)
+    if not pic_url:
+        coordinator.snapshot_captures[serial] = (started, last_url)
+        raise HomeAssistantError("EZVIZ returned no picture url")
+
+    coordinator.snapshot_captures[serial] = (now, pic_url)
+    async_dispatcher_send(hass, SIGNAL_PICTURE_CAPTURED.format(serial), pic_url)
+    return {"picture_url": pic_url, "skipped": False}
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: EzvizConfigEntry,
@@ -222,9 +275,6 @@ class EzvizCamera(EzvizEntity, Camera):
         self._ffmpeg = get_ffmpeg_manager(hass)
         self._use_cloud = use_cloud
         self._live: LiveStream | None = coordinator.live_streams.get(serial)
-        # capture_picture throttle: when the last capture started (monotonic) and its picture
-        self._capture_started: float | None = None
-        self._capture_url: str | None = None
         self._attr_unique_id = serial
         if camera_password or use_cloud:
             self._attr_supported_features = CameraEntityFeature.STREAM
@@ -379,54 +429,17 @@ class EzvizCamera(EzvizEntity, Camera):
         if automatic:
             options = self.coordinator.config_entry.options
             if not options.get(CONF_AUTO_SNAPSHOT, DEFAULT_AUTO_SNAPSHOT):
-                return {"picture_url": self._capture_url, "skipped": True}
+                last_url = self.coordinator.snapshot_captures.get(
+                    self._serial, (None, None)
+                )[1]
+                return {"picture_url": last_url, "skipped": True}
             if min_interval is None:
                 min_interval = int(
                     options.get(CONF_SNAPSHOT_INTERVAL, DEFAULT_SNAPSHOT_INTERVAL)
                 )
-        min_interval = min_interval or 0
-        now = time.monotonic()
-        if (
-            min_interval
-            and self._capture_started is not None
-            and now - self._capture_started < min_interval
-        ):
-            return {"picture_url": self._capture_url, "skipped": True}
-        started = self._capture_started
-        self._capture_started = now
-        client = self.coordinator.ezviz_client
-        try:
-            try:
-                result = await self.hass.async_add_executor_job(
-                    client.capture_picture, self._serial, 1
-                )
-            except PyEzvizError as err:
-                if not _is_wake_timeout(err):
-                    raise
-                _LOGGER.debug(
-                    "%s was still waking (EZVIZ 2009); retrying the capture in %s s",
-                    self._serial,
-                    CAPTURE_RETRY_DELAY,
-                )
-                await asyncio.sleep(CAPTURE_RETRY_DELAY)
-                result = await self.hass.async_add_executor_job(
-                    client.capture_picture, self._serial, 1
-                )
-        except (HTTPError, PyEzvizError) as err:
-            # a failed capture must not hold off the next try
-            self._capture_started = started
-            raise HomeAssistantError(f"Cannot capture picture: {err}") from err
-
-        pic_url = _first_image_url(result)
-        if not pic_url:
-            self._capture_started = started
-            raise HomeAssistantError("EZVIZ returned no picture url")
-
-        self._capture_url = pic_url
-        async_dispatcher_send(
-            self.hass, SIGNAL_PICTURE_CAPTURED.format(self._serial), pic_url
+        return await async_request_snapshot(
+            self.hass, self.coordinator, self._serial, min_interval=min_interval or 0
         )
-        return {"picture_url": pic_url, "skipped": False}
 
     def set_alarm_detection_sensibility(
         self, level: int, type_value: int = 0

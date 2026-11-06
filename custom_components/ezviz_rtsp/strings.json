@@ -76,6 +76,9 @@
       },
       "ptz_up": {
         "name": "PTZ up"
+      },
+      "request_snapshot": {
+        "name": "Request snapshot"
       }
     },
     "image": {
@@ -244,10 +247,10 @@
           "snapshot_interval": "Minimum time between automatic snapshots"
         },
         "data_description": {
-          "auto_snapshot": "Lets the EZVIZ Snapshot card take a new picture each time it comes into view (dashboard opened, tab or app back in front). Each picture wakes a battery camera. Buttons and scripts that call capture_picture are not affected.",
+          "auto_snapshot": "Lets the EZVIZ Snapshot card, and the EZVIZ Video card with capture_on_load: true, take a new picture each time it comes into view (dashboard opened, tab or app back in front). Each picture wakes a battery camera. Buttons, the video card's snapshot chip and scripts that call capture_picture are not affected.",
           "snapshot_interval": "An automatic snapshot of a camera is skipped if it took a picture less than this long ago, in seconds, however many dashboards ask. 0 takes one on every view."
         },
-        "description": "Automatic snapshots from the EZVIZ Snapshot card. A camera is woken for each picture, so keep the interval long enough for battery cameras.",
+        "description": "Automatic snapshots from the EZVIZ Snapshot card and the EZVIZ Video card's capture_on_load. A camera is woken for each picture, so keep the interval long enough for battery cameras.",
         "title": "Snapshots"
       },
       "stream": {

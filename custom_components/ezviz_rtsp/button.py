@@ -12,6 +12,7 @@ from pyezvizapi import EzvizClient
 from pyezvizapi.constants import SupportExt
 from pyezvizapi.exceptions import HTTPError, PyEzvizError
 
+from .camera import async_request_snapshot
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
 from .entity import EzvizEntity
 
@@ -82,6 +83,10 @@ async def async_setup_entry(
         if capability == entity_description.supported_ext
         if value == "1"
     )
+    # Every cloud camera can take a picture on demand, whatever its PTZ support.
+    async_add_entities(
+        EzvizSnapshotButton(coordinator, camera) for camera in coordinator.data
+    )
 
 
 class EzvizButtonEntity(EzvizEntity, ButtonEntity):
@@ -114,3 +119,24 @@ class EzvizButtonEntity(EzvizEntity, ButtonEntity):
             raise HomeAssistantError(
                 f"Cannot perform PTZ action on {self.name}"
             ) from err
+
+
+class EzvizSnapshotButton(EzvizEntity, ButtonEntity):
+    """Ask the camera for a new picture, shown by its Snapshot image entity."""
+
+    _attr_translation_key = "request_snapshot"
+    _attr_icon = "mdi:camera"
+
+    def __init__(
+        self,
+        coordinator: EzvizDataUpdateCoordinator,
+        serial: str,
+    ) -> None:
+        """Initialize the snapshot button."""
+        super().__init__(coordinator, serial)
+        self._attr_unique_id = f"{serial}_request_snapshot"
+
+    @override
+    async def async_press(self) -> None:
+        """Waking the camera can take a while; the service retries a 2009 once."""
+        await async_request_snapshot(self.hass, self.coordinator, self._serial)

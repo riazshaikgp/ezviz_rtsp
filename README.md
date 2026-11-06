@@ -80,18 +80,25 @@ cameras appear as normal camera entities and start showing video.
 The account session is stored in the config entry and renewed quietly in the
 background, so a restart doesn't make you log in again.
 
+Each camera also gets a **Snapshot** image entity
+(`image.<camera>_snapshot`), updated whenever a fresh picture is taken, and a
+**Request snapshot** button in its **Controls** section
+(`button.<camera>_request_snapshot`). See
+[Fresh pictures on demand](#fresh-pictures-on-demand).
+
 ---
 
 ## The card that comes with it
 
 The integration serves its own Lovelace card, so there's no resource to add:
 just pick **EZVIZ Video** in the card picker or paste the YAML. It is styled
-after **Mushroom cards** — a rounded card, an icon tile, a status line and a
-small **play/stop chip in the bottom-right corner** of the picture — but it needs
-neither Mushroom nor any other frontend add-on. The card finds a camera by its
-serial (or `entity`) and plays the integration's **own fast picture stream**,
-falling back to Home Assistant's stream only for a camera the integration does
-not stream itself.
+after **Mushroom cards** — a rounded card, an icon tile, a status line and
+small **play/stop chips in the bottom-right corner** of the picture, plus a
+**snapshot chip** in the bottom-left that wakes the camera for a fresh picture —
+but it needs neither Mushroom nor any other frontend add-on. The card finds a
+camera by its serial (or `entity`) and plays the integration's **own fast
+picture stream**, falling back to Home Assistant's stream only for a camera the
+integration does not stream itself.
 
 A second card, **EZVIZ Snapshot**, shows still pictures instead of video and
 can take a new one each time it comes into view; see
@@ -104,6 +111,11 @@ title: Front door      # optional; defaults to the camera's name
 icon: mdi:doorbell     # optional
 auto_play: false       # optional; off by default — the card waits for a tap
 max_seconds: 60        # optional; stop the stream to protect the battery (0 = never)
+capture_on_load: false # optional; ask for a fresh snapshot when the card opens
+picture: motion        # optional; idle picture: motion, snapshot or newest
+hide_play: false       # optional; hide the play chip
+hide_stop: false       # optional; hide the stop chip
+hide_snapshot: false   # optional; hide the snapshot chip
 ```
 
 | Option | Default | What it does |
@@ -114,13 +126,23 @@ max_seconds: 60        # optional; stop the stream to protect the battery (0 = n
 | `icon` | `mdi:video` | The icon in the tile. |
 | `auto_play` | `false` | Start a clip as soon as the card is on screen. Off (the default) shows the camera's last picture and waits for a tap, so opening a dashboard never wakes a battery camera. A clip stops as soon as the card leaves the screen. |
 | `max_seconds` | `60` | How long a clip runs before it is stopped automatically, counted **from the first frame** (a battery camera can take a while to wake). `0` never stops it on its own, but leaving the card still does. |
+| `capture_on_load` | `false` | Ask for a fresh snapshot each time the card opens (the dashboard view opens, or the tab/app returns). Off by default, so the card never wakes a battery camera on its own; it follows **Configure → Snapshots** for whether automatic captures may run and how often. |
+| `picture` | `motion` | What the card shows while no clip is playing: `motion` (the camera's last alarm picture), `snapshot` (the last picture taken by `capture_picture`; **if no snapshots are available it shows the previous motion frame**), or `newest` (compares both frames and shows the newest one). |
+| `hide_play` | `false` | Hide the play chip while a clip is not running. |
+| `hide_stop` | `false` | Hide the stop chip while a clip is playing. |
+| `hide_snapshot` | `false` | Hide the card's snapshot chip. |
 
-By default the card does nothing until you press play: it shows the camera's
-**last alarm picture** with a small Mushroom-style **play chip in the bottom-right
-corner**. Pressing it starts the live view, which runs for `max_seconds`; a **Stop**
-chip in the same corner ends it early. When `max_seconds` runs out the card
-quietly returns to the last picture — press play again to watch another clip;
-nothing has to be reloaded.
+All of these are also in the card's **visual editor**, which lists your cameras
+and exposes the picture and button options. By default the card does nothing
+until you press play: it shows the camera's **last alarm picture** with a small
+Mushroom-style **play chip in the bottom-right corner**. Pressing it starts the
+live view, which runs for `max_seconds`; a **Stop** chip in the same corner ends
+it early. The **snapshot chip in the bottom-left** asks the camera for a fresh
+picture at any time, idle or while a clip is playing, and shows a spinner while
+it works. Hide any of the three with `hide_play`, `hide_stop` or
+`hide_snapshot`. When `max_seconds` runs out the card quietly returns to the
+last picture — press play again to watch another clip; nothing has to be
+reloaded.
 
 **Leaving the card stops the stream.** Switching to another dashboard view,
 hiding the browser tab, or scrolling the card out of sight all stop it for good,
@@ -163,7 +185,8 @@ Every open and close is written to the Home Assistant log
 limit`), so you can confirm in the log that the camera actually went back to
 sleep.
 
-There's also a visual editor: the serial becomes a dropdown of your cameras.
+The **visual editor** lists your cameras, the idle picture and the three button
+toggles, so nothing above has to be typed by hand.
 
 ---
 
@@ -186,10 +209,11 @@ Everything below lives under **Configure** on the integration:
 - **Release the camera after** — how long the cloud stream is held open after the
   last viewer leaves, in seconds (default **10**; `0` releases it at once). A
   short hold means a quick re-play does not wake the camera again.
-- **Snapshots** — whether the **EZVIZ Snapshot** card may take a new picture
-  when it comes into view (*on by default*), and the minimum time between those
-  automatic pictures for one camera, in seconds (default **300**; `0` takes one
-  on every view), however many dashboards ask. Buttons and scripts that call
+- **Snapshots** — whether the **EZVIZ Snapshot** card and the **EZVIZ Video**
+  card's `capture_on_load` may take a new picture when they come into view (*on
+  by default*), and the minimum time between those automatic pictures for one
+  camera, in seconds (default **300**; `0` takes one on every view), however many
+  dashboards ask. Buttons, the card's snapshot chip and scripts that call
   `capture_picture` are not affected. See
   [Fresh pictures on demand](#fresh-pictures-on-demand).
 - **General** — request timeout and the ffmpeg arguments for cameras you added
@@ -200,9 +224,11 @@ Everything below lives under **Configure** on the integration:
 
 ## Fresh pictures on demand
 
-The camera picture shown on a dashboard is the last **alarm** picture, so a
-battery camera is never woken just to draw it. When you want a picture from
-*now*, call the **`ezviz_rtsp.capture_picture`** service on a camera:
+By default the picture shown on a dashboard is the camera's last **alarm**
+picture, so a battery camera is never woken just to draw it (the card's
+`picture` option can show the last snapshot or whichever is newer instead).
+When you want a picture from *now*, call the
+**`ezviz_rtsp.capture_picture`** service on a camera:
 
 ```yaml
 action: ezviz_rtsp.capture_picture
@@ -213,17 +239,25 @@ target:
 The cloud wakes the camera and it takes a full-resolution picture (a few seconds
 on a battery camera; no RTSP needed). It appears in the camera's **Snapshot**
 image entity (`image.<camera>_snapshot`), and the service returns its
-`picture_url` if you ask for a response. Each call wakes the camera, so put it
-behind a button rather than a timer. The snapshot is kept in memory, so it is
+`picture_url` if you ask for a response. Every camera also gets a **Request
+snapshot** button in its **Controls** section, so you can take a picture with
+one press without writing a service call. Each call wakes the camera, so use it
+on demand rather than on a timer. The snapshot is kept in memory, so it is
 empty again after a restart until the next capture. A sleeping camera often
 answers the first request with EZVIZ error 2009 ("device network exception")
 while it wakes; the service then tries once more after 5 seconds, so such a
 call can take a few seconds longer.
 
-Pass `min_interval: <seconds>` to skip the capture when that camera took a
-picture more recently (the call then returns the last picture with
-`skipped: true`). The throttle is kept per camera in Home Assistant, so it holds
-however many dashboards or automations ask.
+| Service data | Default | What it does |
+|---|---|---|
+| `min_interval` | — | Skip the capture when this camera took a picture less than that many seconds ago; the call then returns the last picture with `skipped: true`. |
+| `automatic` | `false` | Marks the call as made by a card rather than a person: it follows **Configure → Snapshots** and uses the configured interval when `min_interval` is left out. |
+
+The throttle is kept per camera in Home Assistant and is shared by the service,
+the **Request snapshot** button and the cards, so it holds however many
+dashboards or automations ask. A response looks like
+`{"picture_url": "https://…", "skipped": false}`; in a script, ask for it with
+`response_variable`.
 
 ### A snapshot whenever the dashboard is opened
 
@@ -232,15 +266,26 @@ The integration also ships an **EZVIZ Snapshot** card:
 ```yaml
 type: custom:ezviz-snapshot-card
 entity: camera.driveway_gate
+image: image.driveway_gate_snapshot  # optional; found automatically when left out
 title: Driveway gate      # optional
 capture_on_load: true     # optional, off by default; take a picture when the card comes into view
+min_interval: 600         # optional; overrides Configure → Snapshots for this card
 ```
 
-It shows the camera's Snapshot image. Like the video card's `auto_play`,
-`capture_on_load` is **off by default**, so showing the card never wakes a
+| Option | Default | What it does |
+|---|---|---|
+| `entity` | — | The camera entity to watch (required). |
+| `image` | found automatically | The Snapshot image entity to show. Normally resolved from the camera's device; set it only if you want a specific one. |
+| `title` | camera name | The heading in the card. |
+| `capture_on_load` | `false` | Ask for a new picture each time the card comes into view. |
+| `min_interval` | Configure → Snapshots value | Override the minimum time between automatic pictures for this card. |
+
+It shows the camera's Snapshot image. As with the video card's `auto_play` and
+`capture_on_load`, this is **off by default**, so showing the card never wakes a
 battery camera unless you ask it to. With `capture_on_load: true` it asks for a
 new picture each time it comes into view: the dashboard view opens, or the
-browser tab or app comes back to the front. These automatic requests follow
+browser tab or app comes back to the front. The **EZVIZ Video** card has the
+same option (see the table above). These automatic requests follow
 **Configure → Snapshots**:
 
 - **Take a snapshot when a dashboard shows the camera** — on by default; turn it
@@ -248,6 +293,64 @@ browser tab or app comes back to the front. These automatic requests follow
   `capture_picture` still work).
 - **Minimum time between automatic snapshots** — 300 s by default, per camera,
   however many dashboards ask. A card can override it with `min_interval`.
+
+### In automations and scripts
+
+`capture_picture` is a normal action, so any trigger can request a picture:
+
+```yaml
+actions:
+  - action: ezviz_rtsp.capture_picture
+    target:
+      entity_id: camera.driveway_gate
+```
+
+Ask for a response when you want the picture URL — for example, to send it in a
+notification:
+
+```yaml
+actions:
+  - action: ezviz_rtsp.capture_picture
+    target:
+      entity_id: camera.driveway_gate
+    response_variable: shot
+  - action: notify.mobile_app_phone
+    data:
+      message: "Movement at the driveway gate"
+      data:
+        image: "{{ shot.picture_url }}"
+```
+
+`shot.skipped` is `true` when `min_interval` returned the previous picture
+instead of waking the camera. `picture_url` is EZVIZ's own link to the captured
+frame; the **Snapshot** image entity (`image.<camera>_snapshot`) is the picture
+Home Assistant shows and decrypts locally when the camera uses video encryption.
+The camera's **Request snapshot** button can be pressed from an automation too,
+without writing a service call:
+
+```yaml
+actions:
+  - action: button.press
+    target:
+      entity_id: button.driveway_gate_request_snapshot
+```
+
+Do **not** set `automatic: true` in automations: that flag is for the cards and
+makes the call follow **Configure → Snapshots**. An ordinary call always takes a
+picture. Add `min_interval` when a busy trigger (a motion sensor firing often)
+should not wake the camera every time:
+
+```yaml
+actions:
+  - action: ezviz_rtsp.capture_picture
+    target:
+      entity_id: camera.driveway_gate
+    data:
+      min_interval: 120
+```
+
+Every `capture_picture` wakes a battery camera, so keep the interval long enough
+for the battery.
 
 ---
 
@@ -266,7 +369,8 @@ MPEG-TS and the MJPEG one), can hand out a **new token** (links shared before
 then stop working), and has an **Allow other apps to read the stream** switch —
 **off by default**: turn it on to let go2rtc, Frigate and friends read these
 addresses. The bundled card keeps working either way, because it uses its own
-separate token. Reading an address wakes the camera, so treat it like a doorbell:
+authenticated picture view. Reading an address wakes the camera, so treat it
+like a doorbell:
 switch it on for a moment, then let it close.
 
 The same token serves a **live MJPEG picture** too — handy for a plain `<img>` or

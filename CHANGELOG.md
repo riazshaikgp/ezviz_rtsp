@@ -3,6 +3,29 @@
 All notable changes to **Ezviz Cloud with Video** (`ezviz_rtsp`) are listed here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] — 2026-11-06
+
+### Added
+- A **Request snapshot** button in every camera's **Controls** section, and a
+  **snapshot chip** on the **EZVIZ Video** card — a fresh picture with one press.
+- The video card's visual editor now covers the snapshot on open
+  (`capture_on_load`), the idle picture (`picture`: last motion, last snapshot or
+  whichever is newer) and hiding each chip (`hide_play`, `hide_stop`,
+  `hide_snapshot`).
+
+### Changed
+- The `capture_picture` throttle is shared by the service, the button and the
+  cards, so a button press followed by a dashboard opening wakes the camera only
+  once.
+
+### Fixed
+- The EZVIZ Snapshot card no longer counts a scrolled-off card as visible, so
+  `capture_on_load` cannot wake a camera behind another part of a long
+  dashboard.
+- The video card's `picture: snapshot` option is now labelled (and explained in
+  the editor) to show the previous motion frame when no snapshot is available,
+  and `newest` compares both frames.
+
 ## [1.4.0] — 2026-11-06
 
 ### Added
@@ -158,6 +181,7 @@ battery camera can never be left streaming.
   expose no local RTSP, a bundled Mushroom-styled Lovelace card, and a
   token-guarded MPEG-TS address for go2rtc, Frigate and friends.
 
+[1.5.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.5.0
 [1.4.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.4.0
 [1.3.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.3.0
 [1.2.1]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.2.1
