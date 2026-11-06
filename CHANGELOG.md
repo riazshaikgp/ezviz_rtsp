@@ -3,6 +3,13 @@
 All notable changes to **Ezviz Cloud with Video** (`ezviz_rtsp`) are listed here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- After a Home Assistant restart an empty Snapshot image no longer paints the
+  card black: `picture: snapshot` falls back to the last motion picture, and the
+  Snapshot card shows "No snapshot yet" until a capture arrives.
+
 ## [1.5.0] — 2026-11-06
 
 ### Added

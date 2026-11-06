@@ -525,7 +525,11 @@ class EzvizVideoCard extends HTMLElement {
     const id = this._imageId(kind);
     const state = id ? this._hass?.states?.[id] : undefined;
     const pic = state?.attributes?.entity_picture;
-    if (pic) {
+    // An image entity exposes its proxy URL even when it holds no picture yet
+    // (state "unknown"/"unavailable"). Using it would paint a broken/black
+    // frame instead of falling back to the camera's last motion picture.
+    const hasPicture = state && state.state !== "unknown" && state.state !== "unavailable";
+    if (pic && hasPicture) {
       return {
         url: new URL(pic, window.location.origin).toString(),
         ts: this._timeOf(state),
@@ -1290,7 +1294,10 @@ class EzvizSnapshotCard extends HTMLElement {
     const img = image && hass?.states[image];
     const cam = hass?.states[this._config.entity];
     const name = this._config.title || cam?.attributes?.friendly_name || this._config.entity;
-    const picture = img?.attributes?.entity_picture;
+    // The proxy URL exists even when the image entity is still empty after a
+    // restart; show "No snapshot yet" instead of a broken/black frame.
+    const hasPicture = img && img.state !== "unknown" && img.state !== "unavailable";
+    const picture = hasPicture ? img.attributes?.entity_picture : undefined;
     const when = img && !["unknown", "unavailable"].includes(img.state)
       ? new Date(img.state).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
       : "";
