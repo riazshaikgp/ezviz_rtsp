@@ -5,7 +5,7 @@ doorbells, peepholes and other sleepy devices.*
 
 ![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-2f6f4e)
 ![Home Assistant 2026.10+](https://img.shields.io/badge/Home_Assistant-2026.10%2B-3d7ff2)
-[![HACS validation](https://github.com/tarasifua/ezviz_rtsp/actions/workflows/validate.yml/badge.svg)](https://github.com/tarasifua/ezviz_rtsp/actions/workflows/validate.yml)
+[![Marketplace validation](https://github.com/tarasifua/ezviz_rtsp/actions/workflows/validate.yml/badge.svg)](https://github.com/tarasifua/ezviz_rtsp/actions/workflows/validate.yml)
 [![Hassfest](https://github.com/tarasifua/ezviz_rtsp/actions/workflows/hassfest.yml/badge.svg)](https://github.com/tarasifua/ezviz_rtsp/actions/workflows/hassfest.yml)
 
 Licensed under **[Apache-2.0](LICENSE)**. Requires **Home Assistant 2026.10 or newer**.
@@ -35,13 +35,13 @@ it sits **next to** the built-in one instead of replacing it.
 
 ---
 
-## Put it in HACS
+## Put it in Marketplace
 
-[![Open HACS repository in Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tarasifua&repository=ezviz_rtsp&category=integration)
+[![Open Marketplace repository in Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tarasifua&repository=ezviz_rtsp&category=integration)
 
 Or add it by hand:
 
-1. Open **HACS**.
+1. Open **Marketplace**.
 2. Top-right menu (**⋮**) → **Custom repositories**.
 3. Repository: `https://github.com/tarasifua/ezviz_rtsp` — Category: **Integration**.
 4. Find **Ezviz Cloud with Video** in the list, install it, restart Home Assistant.
@@ -50,14 +50,14 @@ Or add it by hand:
 <summary>Bleeding edge (the <code>main</code> branch)</summary>
 
 Releases are the stable channel. To always run the latest committed changes,
-open the integration in HACS → **⋮ → Redownload** and pick **`main`** (the
-default branch) instead of a release. HACS then offers an update every time the
+open the integration in Marketplace → **⋮ → Redownload** and pick **`main`** (the
+default branch) instead of a release. Marketplace then offers an update every time the
 branch moves — no release needed. Switch back to a release the same way.
 
 </details>
 
 <details>
-<summary>No HACS? Copy the folder</summary>
+<summary>No Marketplace? Copy the folder</summary>
 
 Drop `custom_components/ezviz_rtsp/` into `config/custom_components/ezviz_rtsp/`
 on your Home Assistant machine (Samba, SSH, or the *File editor* add-on on
