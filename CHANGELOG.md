@@ -3,7 +3,7 @@
 All notable changes to **Ezviz Cloud with Video** (`ezviz_rtsp`) are listed here.
 This project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.5.1] — 2026-11-06
 
 ### Fixed
 - After a Home Assistant restart an empty Snapshot image no longer paints the
@@ -188,6 +188,7 @@ battery camera can never be left streaming.
   expose no local RTSP, a bundled Mushroom-styled Lovelace card, and a
   token-guarded MPEG-TS address for go2rtc, Frigate and friends.
 
+[1.5.1]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.5.1
 [1.5.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.5.0
 [1.4.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.4.0
 [1.3.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.3.0
