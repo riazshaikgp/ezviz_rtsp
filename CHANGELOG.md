@@ -3,7 +3,7 @@
 All notable changes to **Ezviz Cloud with Video** (`ezviz_rtsp`) are listed here.
 This project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.4.0] — 2026-11-06
 
 ### Added
 - **`ezviz_rtsp.capture_picture`** camera service: the cloud wakes the camera
@@ -158,6 +158,7 @@ battery camera can never be left streaming.
   expose no local RTSP, a bundled Mushroom-styled Lovelace card, and a
   token-guarded MPEG-TS address for go2rtc, Frigate and friends.
 
+[1.4.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.4.0
 [1.3.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.3.0
 [1.2.1]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.2.1
 [1.2.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.2.0

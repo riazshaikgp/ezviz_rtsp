@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
+from pyezvizapi.exceptions import PyEzvizError
 
 from custom_components.ezviz_rtsp import live
 from custom_components.ezviz_rtsp.cloud_stream import (
     PackSplitter,
     decrypt_packs,
 )
-from custom_components.ezviz_rtsp.const import DOMAIN
+from custom_components.ezviz_rtsp.const import DOMAIN, SIGNAL_PICTURE_CAPTURED
 from custom_components.ezviz_rtsp.live import (
     EzvizCloudCooldownError,
     LiveCardMjpegView,
@@ -743,3 +746,213 @@ async def test_options_stream_step_saves_the_limit() -> None:
     assert result["data"]["max_session"] == 120
     # The other options are kept.
     assert result["data"]["transcode"] is True
+
+
+# --- snapshots: capture_picture service, Snapshot image and options ----------
+
+
+def _capture_camera(options: dict | None = None):
+    """A cloud camera whose coordinator carries the given Snapshots options."""
+    hass = _hass()
+    coordinator = _coordinator()
+    coordinator.config_entry.options = options or {}
+    return _cloud_camera(coordinator, hass), coordinator
+
+
+async def test_capture_picture_returns_the_url_and_notifies_the_snapshot() -> None:
+    camera, coordinator = _capture_camera()
+    coordinator.ezviz_client.capture_picture.return_value = {
+        "captureInfo": {"picUrl": "https://ezviz/pic.jpg"}
+    }
+    with patch(
+        "custom_components.ezviz_rtsp.camera.async_dispatcher_send"
+    ) as send:
+        result = await camera.async_capture_picture()
+
+    assert result == {"picture_url": "https://ezviz/pic.jpg", "skipped": False}
+    coordinator.ezviz_client.capture_picture.assert_called_once_with("BK1", 1)
+    send.assert_called_once()
+    assert send.call_args.args[1] == SIGNAL_PICTURE_CAPTURED.format("BK1")
+    assert send.call_args.args[2] == "https://ezviz/pic.jpg"
+    assert camera._capture_started is not None
+    assert camera._capture_url == "https://ezviz/pic.jpg"
+
+
+async def test_capture_picture_is_skipped_inside_min_interval() -> None:
+    camera, coordinator = _capture_camera()
+    camera._capture_started = time.monotonic()
+    camera._capture_url = "https://ezviz/old.jpg"
+
+    result = await camera.async_capture_picture(min_interval=300)
+
+    assert result == {"picture_url": "https://ezviz/old.jpg", "skipped": True}
+    coordinator.ezviz_client.capture_picture.assert_not_called()
+
+
+async def test_capture_picture_runs_again_after_min_interval() -> None:
+    camera, coordinator = _capture_camera()
+    coordinator.ezviz_client.capture_picture.return_value = {
+        "captureInfo": {"picUrl": "https://ezviz/new.jpg"}
+    }
+    camera._capture_started = time.monotonic() - 400
+    camera._capture_url = "https://ezviz/old.jpg"
+
+    result = await camera.async_capture_picture(min_interval=300)
+
+    assert result == {"picture_url": "https://ezviz/new.jpg", "skipped": False}
+    coordinator.ezviz_client.capture_picture.assert_called_once_with("BK1", 1)
+
+
+async def test_capture_picture_retries_once_when_the_camera_is_still_waking() -> None:
+    camera, coordinator = _capture_camera()
+    coordinator.ezviz_client.capture_picture.side_effect = [
+        PyEzvizError("Error: Got {'meta': {'code': 2009, 'message': 'waking'}}"),
+        {"captureInfo": {"picUrl": "https://ezviz/pic.jpg"}},
+    ]
+
+    with patch("asyncio.sleep", AsyncMock()) as sleep:
+        result = await camera.async_capture_picture()
+
+    assert result == {"picture_url": "https://ezviz/pic.jpg", "skipped": False}
+    assert coordinator.ezviz_client.capture_picture.call_count == 2
+    sleep.assert_awaited_once_with(5)
+
+
+async def test_capture_picture_other_errors_raise_and_release_the_throttle() -> None:
+    camera, coordinator = _capture_camera()
+    coordinator.ezviz_client.capture_picture.side_effect = PyEzvizError(
+        "Error: Got {'meta': {'code': 4001, 'message': 'nope'}}"
+    )
+
+    with pytest.raises(HomeAssistantError, match="Cannot capture picture"):
+        await camera.async_capture_picture()
+
+    assert coordinator.ezviz_client.capture_picture.call_count == 1
+    # A failed capture must not hold off the next try.
+    assert camera._capture_started is None
+
+
+async def test_capture_picture_without_a_url_raises() -> None:
+    camera, coordinator = _capture_camera()
+    coordinator.ezviz_client.capture_picture.return_value = {"captureInfo": {}}
+
+    with pytest.raises(HomeAssistantError, match="no picture url"):
+        await camera.async_capture_picture()
+
+    assert camera._capture_started is None
+
+
+async def test_capture_picture_automatic_obeys_the_master_switch() -> None:
+    camera, coordinator = _capture_camera({"auto_snapshot": False})
+
+    result = await camera.async_capture_picture(automatic=True)
+
+    assert result == {"picture_url": None, "skipped": True}
+    coordinator.ezviz_client.capture_picture.assert_not_called()
+
+
+async def test_capture_picture_automatic_uses_the_configured_interval() -> None:
+    camera, coordinator = _capture_camera(
+        {"auto_snapshot": True, "snapshot_interval": 300}
+    )
+    camera._capture_started = time.monotonic() - 100
+    camera._capture_url = "https://ezviz/recent.jpg"
+
+    result = await camera.async_capture_picture(automatic=True)
+
+    assert result == {"picture_url": "https://ezviz/recent.jpg", "skipped": True}
+    coordinator.ezviz_client.capture_picture.assert_not_called()
+
+
+async def test_capture_picture_explicit_call_ignores_the_master_switch() -> None:
+    camera, coordinator = _capture_camera({"auto_snapshot": False})
+    coordinator.ezviz_client.capture_picture.return_value = {
+        "captureInfo": {"picUrl": "https://ezviz/pic.jpg"}
+    }
+
+    result = await camera.async_capture_picture()
+
+    assert result["skipped"] is False
+    coordinator.ezviz_client.capture_picture.assert_called_once_with("BK1", 1)
+
+
+def test_first_image_url_accepts_the_known_keys() -> None:
+    from custom_components.ezviz_rtsp.camera import _first_image_url
+
+    assert (
+        _first_image_url({"captureInfo": {"picUrl": "https://e/a.jpg"}})
+        == "https://e/a.jpg"
+    )
+    assert (
+        _first_image_url({"captureInfo": {"imageUrl": "https://e/b.jpg"}})
+        == "https://e/b.jpg"
+    )
+    assert _first_image_url({"captureInfo": {}}) is None
+    assert _first_image_url(None) is None
+
+
+def test_is_wake_timeout_only_matches_the_2009_code() -> None:
+    from custom_components.ezviz_rtsp.camera import _is_wake_timeout
+
+    assert _is_wake_timeout(PyEzvizError("Got {'meta': {'code': 2009}}")) is True
+    assert _is_wake_timeout(PyEzvizError("Got {'meta': {'code': 4001}}")) is False
+    assert _is_wake_timeout(ValueError("'code': 2009")) is False
+
+
+def _snapshot(hass, coordinator):
+    from custom_components.ezviz_rtsp.image import EzvizSnapshot
+
+    entity = EzvizSnapshot(hass, coordinator, "BK1")
+    entity.entity_id = "image.door_snapshot"
+    entity.async_write_ha_state = MagicMock()
+    return entity
+
+
+def test_snapshot_image_updates_when_a_picture_is_captured() -> None:
+    hass = MagicMock()
+    coordinator = _coordinator()
+    coordinator.data["BK1"]["last_alarm_pic"] = "https://ezviz/alarm.jpg"
+    entity = _snapshot(hass, coordinator)
+    # Starts empty: the capture service fills it, not the coordinator.
+    assert entity._attr_image_url is None
+    assert entity._attr_image_last_updated is None
+    entity._cached_image = object()
+
+    entity._handle_picture_captured("https://ezviz/pic.jpg")
+
+    assert entity._attr_image_url == "https://ezviz/pic.jpg"
+    assert entity._cached_image is None
+    assert entity._attr_image_last_updated is not None
+    entity.async_write_ha_state.assert_called_once()
+
+
+def test_snapshot_image_ignores_the_last_alarm_picture() -> None:
+    hass = MagicMock()
+    coordinator = _coordinator()
+    entity = _snapshot(hass, coordinator)
+    entity._attr_image_url = "https://ezviz/mine.jpg"
+    coordinator.data["BK1"]["last_alarm_pic"] = "https://ezviz/alarm.jpg"
+
+    entity._handle_coordinator_update()
+
+    assert entity._attr_image_url == "https://ezviz/mine.jpg"
+    entity.async_write_ha_state.assert_called_once()
+
+
+async def test_options_snapshots_step_saves_the_options() -> None:
+    flow, entry = _options_flow({})
+    entry.options = {"transcode": True}
+    result = await flow.async_step_snapshots(
+        {"auto_snapshot": False, "snapshot_interval": 120}
+    )
+    assert result["data"]["auto_snapshot"] is False
+    assert result["data"]["snapshot_interval"] == 120
+    assert result["data"]["transcode"] is True
+
+
+async def test_options_snapshots_form_shows_the_current_options() -> None:
+    flow, entry = _options_flow({})
+    entry.options = {"auto_snapshot": False, "snapshot_interval": 60}
+    result = await flow.async_step_snapshots()
+    assert result["type"] == "form"
+    assert result["step_id"] == "snapshots"
