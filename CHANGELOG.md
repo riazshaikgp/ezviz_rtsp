@@ -3,6 +3,18 @@
 All notable changes to **Ezviz Cloud with Video** (`ezviz_rtsp`) are listed here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] — 2026-11-07
+
+### Added
+- The EZVIZ Video card can show the date and time of the picture it is showing
+  (the motion or snapshot image, whichever `picture` selects) in the top-right
+  corner. `show_timestamp` turns it on (off by default); it is hidden while a
+  clip plays.
+
+### Fixed
+- The video card's visual editor no longer jumps back to the top (and no longer
+  loses the field focus) after changing an option.
+
 ## [1.5.1] — 2026-11-06
 
 ### Fixed
@@ -188,6 +200,7 @@ battery camera can never be left streaming.
   expose no local RTSP, a bundled Mushroom-styled Lovelace card, and a
   token-guarded MPEG-TS address for go2rtc, Frigate and friends.
 
+[1.6.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.6.0
 [1.5.1]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.5.1
 [1.5.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.5.0
 [1.4.0]: https://github.com/tarasifua/ezviz_rtsp/releases/tag/v1.4.0

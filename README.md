@@ -116,6 +116,7 @@ picture: motion        # optional; idle picture: motion, snapshot or newest
 hide_play: false       # optional; hide the play chip
 hide_stop: false       # optional; hide the stop chip
 hide_snapshot: false   # optional; hide the snapshot chip
+show_timestamp: false  # optional; show the picture's date and time
 ```
 
 | Option | Default | What it does |
@@ -131,6 +132,7 @@ hide_snapshot: false   # optional; hide the snapshot chip
 | `hide_play` | `false` | Hide the play chip while a clip is not running. |
 | `hide_stop` | `false` | Hide the stop chip while a clip is playing. |
 | `hide_snapshot` | `false` | Hide the card's snapshot chip. |
+| `show_timestamp` | `false` | Show the date and time of the picture currently on the card (the motion or snapshot image, whichever `picture` selects) in the top-right corner. It disappears while a clip is playing. |
 
 All of these are also in the card's **visual editor**, which lists your cameras
 and exposes the picture and button options. By default the card does nothing

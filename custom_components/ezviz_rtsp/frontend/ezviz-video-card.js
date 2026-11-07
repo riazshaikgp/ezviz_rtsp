@@ -14,6 +14,7 @@
 //   hide_play: false       # optional; hide the play chip
 //   hide_stop: false       # optional; hide the stop chip
 //   hide_snapshot: false   # optional; hide the snapshot chip
+//   show_timestamp: false  # optional; show the picture's date and time
 //
 // The card shows the camera's live picture from the integration's own stream:
 // its fast MJPEG path (an <img> that appears a few seconds after the camera
@@ -97,7 +98,8 @@ const STRINGS = /* translations */ {
     "snapshot": "Snapshot",
     "hide_play": "Hide the play button",
     "hide_stop": "Hide the stop button",
-    "hide_snapshot": "Hide the snapshot button"
+    "hide_snapshot": "Hide the snapshot button",
+    "show_timestamp": "Show the picture date and time"
   },
   "uk": {
     "play": "Дивитися",
@@ -124,7 +126,8 @@ const STRINGS = /* translations */ {
     "snapshot": "Снапшот",
     "hide_play": "Приховати кнопку відтворення",
     "hide_stop": "Приховати кнопку зупинки",
-    "hide_snapshot": "Приховати кнопку снапшота"
+    "hide_snapshot": "Приховати кнопку снапшота",
+    "show_timestamp": "Показувати дату й час знімка"
   }
 } /* end translations */;
 
@@ -138,6 +141,19 @@ const t = (lang, key, vars) => {
 const pickLang = (hass) => {
   const lang = hass?.locale?.language || hass?.language || "en";
   return STRINGS[lang] ? lang : STRINGS[lang.split("-")[0]] ? lang.split("-")[0] : "en";
+};
+
+// The card's defaults, shared with the visual editor so every control shows the
+// value the card is actually using (not just the keys present in the YAML).
+const CARD_DEFAULTS = {
+  max_seconds: 60,
+  auto_play: false,
+  capture_on_load: false,
+  picture: "motion",
+  hide_play: false,
+  hide_stop: false,
+  hide_snapshot: false,
+  show_timestamp: false,
 };
 
 const style = /* css */ `
@@ -229,6 +245,12 @@ const style = /* css */ `
     animation: chipspin 900ms linear infinite;
   }
   @keyframes chipspin { to { transform: rotate(360deg); } }
+  .when {
+    position: absolute; top: 8px; right: 8px; z-index: 2;
+    font-size: 11px; line-height: 1; padding: 5px 8px; border-radius: 999px;
+    color: #fff; background: color-mix(in srgb, #000 55%, transparent);
+    backdrop-filter: blur(4px); pointer-events: none;
+  }
 
   .spinner {
     position: absolute; right: 10px; bottom: 10px; z-index: 2;
@@ -267,6 +289,7 @@ class EzvizVideoCard extends HTMLElement {
     this._imagesCam = undefined;
     this._posterShown = undefined;
     this._posterEl = null;
+    this._whenEl = null;
   }
 
   static getStubConfig() {
@@ -284,16 +307,7 @@ class EzvizVideoCard extends HTMLElement {
     // Play, snapshots and waking the camera are all off by default: the card
     // shows the camera's last picture and waits for a tap, so opening the
     // dashboard never wakes a battery camera.
-    this._config = {
-      max_seconds: 60,
-      auto_play: false,
-      capture_on_load: false,
-      picture: "motion",
-      hide_play: false,
-      hide_stop: false,
-      hide_snapshot: false,
-      ...config,
-    };
+    this._config = { ...CARD_DEFAULTS, ...config };
     this._device = undefined;
     this._images = {};
     this._imagesFrom = undefined;
@@ -319,6 +333,7 @@ class EzvizVideoCard extends HTMLElement {
     }
     this._syncBattery();
     this._syncPoster();
+    this._syncWhen();
   }
 
   getCardSize() {
@@ -603,6 +618,34 @@ class EzvizVideoCard extends HTMLElement {
     this._posterEl.style.backgroundImage = `url("${url}")`;
   }
 
+  // The date and time of the picture currently on the card (motion or
+  // snapshot, whichever _poster picked). Empty when the source has no timestamp.
+  _whenText() {
+    if (!this._config?.show_timestamp) return "";
+    const picture = this._poster();
+    if (!picture?.ts) return "";
+    return new Date(picture.ts).toLocaleString([], {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+  }
+
+  _syncWhen() {
+    if (!this._config) return;
+    const text = this._state === "playing" ? "" : this._whenText();
+    if (this._whenEl) {
+      this._whenEl.textContent = text;
+      this._whenEl.hidden = !text;
+      return;
+    }
+    if (text && this._media && this._state !== "playing") {
+      this._whenEl = document.createElement("div");
+      this._whenEl.className = "when";
+      this._whenEl.textContent = text;
+      this._media.appendChild(this._whenEl);
+    }
+  }
+
   _batteryEntity() {
     return this._findDevice()?.battery_entity_id || null;
   }
@@ -697,6 +740,7 @@ class EzvizVideoCard extends HTMLElement {
     this._posterShown = poster;
 
     this._snapshotChipEl = null;
+    this._whenEl = null;
     if (this._state === "playing" && this._video) {
       media.appendChild(this._video); // re-attach the running element
       if (!this._config.hide_stop) media.appendChild(this._stopChip());
@@ -718,6 +762,16 @@ class EzvizVideoCard extends HTMLElement {
         message.textContent = this._message;
         media.appendChild(message);
       }
+    }
+
+    // The picture's own date and time, over the top-right corner. Hidden while
+    // a clip is playing (the live view is now, not a still).
+    const when = this._state === "playing" ? "" : this._whenText();
+    if (when) {
+      this._whenEl = document.createElement("div");
+      this._whenEl.className = "when";
+      this._whenEl.textContent = when;
+      media.appendChild(this._whenEl);
     }
 
     wrap.append(header, media);
@@ -1088,25 +1142,39 @@ class EzvizVideoCardEditor extends HTMLElement {
       { name: "hide_play", selector: { boolean: {} } },
       { name: "hide_stop", selector: { boolean: {} } },
       { name: "hide_snapshot", selector: { boolean: {} } },
+      { name: "show_timestamp", selector: { boolean: {} } },
     ];
-    const form = document.createElement("ha-form");
+    // Reuse the same <ha-form>. Lovelace calls setConfig() after every change;
+    // replacing the form then would collapse the dialog and jump its scroll
+    // position back to the top.
+    let form = this._form;
+    if (!form) {
+      form = document.createElement("ha-form");
+      this._form = form;
+      form.addEventListener("value-changed", (event) => {
+        this._config = event.detail.value;
+        this.dispatchEvent(
+          new CustomEvent("config-changed", {
+            detail: { config: this._config },
+            bubbles: true,
+            composed: true,
+          })
+        );
+      });
+      this.replaceChildren(form);
+    }
     form.hass = this._hass;
-    form.data = this._config;
-    form.schema = schema;
-    form.computeLabel = (field) => t(lang, field.name);
-    form.computeHelper = (field) =>
-      field.name === "picture" ? t(lang, "picture_helper") : "";
-    form.addEventListener("value-changed", (event) => {
-      this._config = event.detail.value;
-      this.dispatchEvent(
-        new CustomEvent("config-changed", {
-          detail: { config: this._config },
-          bubbles: true,
-          composed: true,
-        })
-      );
-    });
-    this.replaceChildren(form);
+    // Rebuild the fields only when the camera list or language changes; a new
+    // schema on every keystroke would re-render them and steal the focus.
+    const schemaKey = `${lang}|${(this._devices || []).map((d) => d.serial).join(",")}`;
+    if (this._schemaKey !== schemaKey) {
+      form.schema = schema;
+      form.computeLabel = (field) => t(lang, field.name);
+      form.computeHelper = (field) =>
+        field.name === "picture" ? t(lang, "picture_helper") : "";
+      this._schemaKey = schemaKey;
+    }
+    form.data = { ...CARD_DEFAULTS, ...this._config };
   }
 }
 
