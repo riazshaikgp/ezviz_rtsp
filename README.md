@@ -146,6 +146,12 @@ it works. Hide any of the three with `hide_play`, `hide_stop` or
 last picture — press play again to watch another clip; nothing has to be
 reloaded.
 
+With **`show_timestamp: true`** the card also puts the date and time of the
+still in the top-right corner — when the motion picture or snapshot was taken,
+matching whatever `picture` currently shows. It is **off by default**, vanishes
+as soon as a clip starts and returns with the last picture when the clip stops.
+Turn it on in the visual editor or with the option above.
+
 **Leaving the card stops the stream.** Switching to another dashboard view,
 hiding the browser tab, or scrolling the card out of sight all stop it for good,
 so a battery camera is never left streaming behind another view; come back and
