@@ -62,6 +62,8 @@ CHANNEL = 1
 # for IDLE seconds after the first packet.
 CLIP_DEADLINE = 90.0
 CLIP_IDLE = 4.0
+# The socket's own timeout must outlast a camera waking up.
+CLIP_SOCKET_TIMEOUT = 30.0
 CLIP_MAX_BYTES = 96 * 1024 * 1024
 # A recording longer than this is not a clip; refuse it rather than stream an hour.
 MAX_CLIP_SECONDS = 15 * 60
@@ -312,25 +314,36 @@ def _download_clip(
             end,
             channel=CHANNEL,
             timezone=timezone,
-            timeout=CLIP_IDLE,
+            timeout=CLIP_SOCKET_TIMEOUT,
             capture_deadline=deadline,
         )
         try:
             info = stream.start(deadline=deadline)
             if info.result not in (None, 0):
                 raise EzvizPlaybackNegotiationError(info.result)
-            try:
+
+            def _take(**limits: Any) -> int:
+                taken = 0
                 for packet in stream.iter_packets(
                     duration_seconds=max(deadline - time.monotonic(), 1.0),
                     duration_from_start=True,
-                    first_packet_deadline=deadline,
-                    stream_packet_timeout_seconds=CLIP_IDLE,
+                    **limits,
                 ):
                     if packet.encrypted:
                         raise RecordingError("The camera sent the clip on an encrypted channel")
-                    data += packet.body
+                    data.extend(packet.body)
+                    taken += 1
                     if len(data) > CLIP_MAX_BYTES:
                         raise RecordingError("The recording is too large to play here")
+                return taken
+
+            try:
+                # A sleeping camera takes a while to send its first packet: wait
+                # for it against the whole deadline. pyezvizapi's idle timer runs
+                # from the start of iteration, so it only applies afterwards, when
+                # IDLE seconds without data mean the clip is over.
+                if _take(first_packet_deadline=deadline, max_packets=1):
+                    _take(stream_packet_timeout_seconds=CLIP_IDLE)
             except VtmStreamEOF:
                 pass
             except VtmStreamTimeout:
