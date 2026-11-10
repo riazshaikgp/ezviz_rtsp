@@ -362,6 +362,41 @@ for the battery.
 
 ---
 
+## Recordings on the SD card
+
+A camera with an SD card keeps its recordings there, and the EZVIZ cloud can
+both list and replay them — the same way the EZVIZ app's playback works away
+from home. The **EZVIZ Recordings** card shows them:
+
+```yaml
+type: custom:ezviz-recordings-card
+entity: camera.driveway_gate   # or serial: BB1234567
+title: Driveway gate           # optional; defaults to "<camera> recordings"
+format: auto                   # optional; auto, h264 or hevc
+max_height: 360                # optional; height of the list in pixels
+```
+
+It lists one day at a time (today first; the arrows go to earlier days), newest
+recording first and grouped by hour. Tap one and it plays in the card's own
+player; tap another to switch, or close the player with ✕.
+
+- **Battery.** Reading the list only asks the SD index. Playing a recording
+  makes the cloud wake the camera and read the file from the card, much like
+  the live view, so a recording is fetched only when you tap it. A fetched
+  recording is cached in Home Assistant (the last 16), so seeking and playing it
+  again don't wake the camera.
+- **Speed.** A short motion clip takes about 10–20 seconds to arrive from a
+  battery camera (most of it waking up); the card shows progress meanwhile.
+- **Format.** The camera records HEVC (H.265). With `format: auto` the card asks
+  for it as is when the browser plays HEVC (Safari, the iOS app, most Chrome and
+  Edge on Windows and macOS) and for an H.264 copy converted by Home Assistant
+  otherwise (Firefox); if the HEVC copy doesn't play, it asks for H.264 once.
+- **One at a time.** A camera serves one cloud session at a time: stop its live
+  view before playing a recording, and expect "the camera refused to play" if
+  the EZVIZ app is watching it at that moment.
+- **Time zone.** The SD index is in the camera's local time; Home Assistant's
+  time zone is used to read it, so the two should match.
+
 ## Feeding other apps (Frigate, go2rtc, …)
 
 Once you allow it (see below), every camera can be read by other apps as plain
