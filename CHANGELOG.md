@@ -14,12 +14,16 @@ This project follows [Semantic Versioning](https://semver.org/).
   MP4 view with range requests. A recording is fetched from the camera through
   the EZVIZ cloud only when it is tapped, kept in a small cache (16 clips), and
   served as the camera's own HEVC to browsers that play it or as H.264 converted
-  by Home Assistant to the rest.
+  by Home Assistant to the rest. A sleeping camera's first SD search is retried
+  once after 5 s (EZVIZ error 2009, as for `capture_picture`). See
+  [Recordings on the SD card](README.md#recordings-on-the-sd-card).
 
 ### Changed
 - Requires **pyezvizapi 2.0.0** (was 1.0.5.0), which added SD playback through
   the cloud relay. The live view follows its new module layout
-  (`pyezvizapi.streaming.cloud`); nothing changes for users.
+  (`pyezvizapi.streaming.cloud`; 2.0.0 removed `pyezvizapi.cloud_stream`), and
+  every other call the integration makes is unchanged in 2.0.0. Home Assistant
+  installs it on the next start.
 
 ## [1.6.0] — 2026-11-07
 
