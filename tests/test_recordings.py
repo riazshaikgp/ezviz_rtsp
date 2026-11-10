@@ -114,10 +114,32 @@ def test_search_day_reports_a_cut_short_list() -> None:
     ("code", "text"),
     [("2009", "did not answer in time"), ("2004", "SD card"), ("9999", "Could not read")],
 )
-def test_search_day_explains_camera_errors(code: str, text: str) -> None:
+def test_search_day_explains_camera_errors(code: str, text: str, monkeypatch) -> None:
+    monkeypatch.setattr(rec_module, "WAKE_RETRY_SECONDS", 0)
     index = FakeIndex([], fail=PyEzvizError(f"Could not search v2 records: response code={code}"))
     with pytest.raises(RecordingError, match=text):
         search_day(index, "BB1", date(2026, 11, 9), TZ, datetime(2026, 11, 10, tzinfo=TZ))
+    # Only the "camera asleep" answer is retried, and only once.
+    assert len(index.calls) == (2 if code == "2009" else 1)
+
+
+def test_search_day_retries_once_while_the_camera_wakes(monkeypatch) -> None:
+    monkeypatch.setattr(rec_module, "WAKE_RETRY_SECONDS", 0)
+    index = FakeIndex([datetime(2026, 11, 9, 8, 0)])
+    real = index.search_records_v2
+
+    def waking(*args, **kwargs):
+        if not index.calls:
+            index.calls.append(("asleep", ""))
+            raise PyEzvizError("Could not search v2 records: response code=2009, fields=4")
+        return real(*args, **kwargs)
+
+    index.search_records_v2 = waking
+    found, complete = search_day(
+        index, "BB1", date(2026, 11, 9), TZ, datetime(2026, 11, 10, tzinfo=TZ)
+    )
+    assert complete
+    assert len(found) == 1
 
 
 def test_utc_stamps_round_trip() -> None:

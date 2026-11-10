@@ -56,6 +56,8 @@ MAX_PAGES = 40
 TODAY_TTL = 60.0
 # The camera channel recordings are searched and replayed on (0 is refused).
 CHANNEL = 1
+# A sleeping camera answers its first search with EZVIZ error 2009; retry once after this long.
+WAKE_RETRY_SECONDS = 5.0
 
 # Replay: give up if the camera hasn't delivered the whole clip in this time
 # (it may first have to wake up), and call a clip finished once no data came
@@ -206,6 +208,7 @@ def search_day(
     end = min(start + timedelta(days=1), now.astimezone(tz).replace(microsecond=0))
     found: dict[tuple[datetime, datetime], None] = {}
     cursor = start
+    retried = False
     for _ in range(MAX_PAGES):
         if cursor >= end:
             return list(found), True
@@ -218,7 +221,13 @@ def search_day(
                 size=PAGE_SIZE,
             )
         except PyEzvizError as err:
-            raise RecordingError(_explain(err)) from err
+            # A sleeping camera answers the first search with 2009 while it wakes
+            # (like capture_picture); ask once more after a moment.
+            if "2009" not in str(err) or retried:
+                raise RecordingError(_explain(err)) from err
+            retried = True
+            time.sleep(WAKE_RETRY_SECONDS)
+            continue
         records, more = decode_records(answer)
         latest = cursor
         for record in records:
