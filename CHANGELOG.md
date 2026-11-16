@@ -67,6 +67,17 @@ This project follows [Semantic Versioning](https://semver.org/).
   the month was last checked and whether the check was complete.
 
 ### Fixed
+- **Opening a recording no longer scrolls the page (or the list).** Clicking a
+  row rebuilt the whole card. That put the picture box back from the clip's own
+  shape to the fixed 16:9, so the card got shorter — and a page scrolled to its
+  bottom was clamped upwards, which is exactly what it looked like from a row
+  near the end of the list. The list was re-created too. Selecting a row, its
+  progress, the player, an error and closing the clip now all repaint the
+  existing media area and update the rows in place; nothing about the card is
+  built again until the mode or the day changes. When the card is rebuilt after
+  all (switching between live and the recordings, or picking another day) the
+  page's scroll position is put back, because replacing the card's subtree makes
+  the browser drop its scroll anchor and jump to the top of the dashboard.
 - **Playing a recording (and the live picture) fills the card's width.** The
   picture box was fixed at 16:9 with `object-fit: contain`, so a 4:3 camera —
   every EZVIZ doorbell records 4:3 — sat between two black bands. The box now

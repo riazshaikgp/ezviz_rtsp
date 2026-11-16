@@ -1053,6 +1053,10 @@ class EzvizVideoCard extends HTMLElement {
     } catch {
       /* activeElement is not available in every embedded browser */
     }
+    // Replacing the card's subtree can also make the browser lose its scroll
+    // anchor and jump the page to the top (Home Assistant scrolls the window),
+    // so remember where the reader was and put it back.
+    const keepPlace = this._keepPagePlace();
 
     // Rebuilding the card replaces the list, which would otherwise bounce it to
     // the top: a clip tapped near the bottom must stay where it was while it is
@@ -1180,6 +1184,8 @@ class EzvizVideoCard extends HTMLElement {
     }
     this._header = { tile, primary, secondary, dot, status, battery };
     this._syncBattery();
+    keepPlace();
+    setTimeout(keepPlace, 0);
   }
 
   _statusText() {
@@ -1855,7 +1861,10 @@ class EzvizVideoCard extends HTMLElement {
       // then, so the intermediate ones are never fetched.
       this._queuedClip = same ? null : { rec, fallback };
       this._stopProgress();
-      this._render();
+      // In place: a rebuild would drop the row the reader just clicked and can
+      // scroll the page, which is very visible near the bottom of the list.
+      this._syncRows();
+      this._repaintClipMedia();
       if (same) {
         this._startProgress(
           serial,
@@ -1886,7 +1895,8 @@ class EzvizVideoCard extends HTMLElement {
     const ticket = cloud ? { rec, format } : null;
     if (ticket) this._clipFetching = ticket;
     this._stopProgress();
-    this._render();
+    this._syncRows();
+    this._repaintClipMedia();
     if (ticket) this._startProgress(serial, rec, format, gen);
     try {
       // Another view (or another browser) may have started the live stream
@@ -1913,14 +1923,18 @@ class EzvizVideoCard extends HTMLElement {
       // Some browsers scroll the page when a video starts playing (or when the
       // focused row disappears). Put the reader's place back around it.
       const keepPlace = this._keepPagePlace();
-      this._showClipPlayer(rec);
+      this._syncRows();
+      this._repaintClipMedia();
       const video = this._ensureClipVideo();
       video.src = result.url;
       video.onloadedmetadata = () => {
         // The camera's index can be a second or two off the file it sends;
         // once the player knows the real length, show that in the row.
         if (this._selected !== rec) return;
+        // The picture's shape can change the card's height: keep the reader's
+        // place even if the page was scrolled to its bottom.
         this._fitMediaTo(video);
+        keepPlace();
         const seconds = Math.round(video.duration);
         if (!Number.isFinite(seconds) || seconds <= 0) return;
         const listed = rec.seconds;
@@ -1946,7 +1960,7 @@ class EzvizVideoCard extends HTMLElement {
       this._stopProgress();
       this._clipState = "error";
       this._clipError = err?.message || String(err);
-      this._render();
+      this._repaintClipMedia();
     } finally {
       if (ticket && this._clipFetching === ticket) {
         this._clipFetching = null;
@@ -2119,30 +2133,42 @@ class EzvizVideoCard extends HTMLElement {
     }
   }
 
-  // The clip is ready: put the player where the progress bar was. A full render
-  // would throw the whole card away - the row that was just clicked, its
-  // focus, and the page's place - right as the video starts.
-  _showClipPlayer(rec) {
-    this._syncClipRow(rec);
+  // Repaint the picture area for the clip's current state. Rebuilding the card
+  // would throw away the list, the row that was just clicked, its focus and the
+  // page's place - very visible when the row is near the bottom of the list.
+  _repaintClipMedia() {
     const media = this._media;
     if (!media) {
       this._render();
       return;
     }
-    this._progressDom = null;
-    this._whenEl?.remove();
-    this._whenEl = null;
     media.replaceChildren();
+    // The overlays went with the old children; _syncWhen adds one back if it
+    // still applies.
+    this._whenEl = null;
     if (this._posterEl) media.appendChild(this._posterEl);
-    media.appendChild(this._ensureClipVideo());
-    media.appendChild(this._closeClipButton());
+    this._renderRecordingMedia(media);
+    this._syncWhen();
   }
 
-  // The row's "where" icon and length follow the saved file, without a render.
-  _syncClipRow(rec) {
-    const rows = this.shadowRoot?.querySelectorAll(".recRow") || [];
-    for (const row of rows) {
-      if (row.dataset.begin !== rec.begin || row.dataset.end !== rec.end) continue;
+  // The list's rows follow the selection and each clip's saved state, without
+  // rebuilding the list.
+  _syncRows() {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const byKey = new Map();
+    for (const rec of this._list?.recordings || []) {
+      byKey.set(`${rec.begin}|${rec.end}`, rec);
+    }
+    for (const row of root.querySelectorAll(".recRow")) {
+      const rec = byKey.get(`${row.dataset.begin}|${row.dataset.end}`);
+      const on = Boolean(rec && this._selected && sameRecording(rec, this._selected));
+      row.classList.toggle("on", on);
+      const play = row.firstElementChild;
+      if (play) {
+        play.setAttribute("icon", on ? "mdi:play-circle" : "mdi:play-circle-outline");
+      }
+      if (!rec) continue;
       const where = row.querySelector(".where");
       if (where) {
         where.className =
@@ -2162,7 +2188,6 @@ class EzvizVideoCard extends HTMLElement {
       }
       const len = row.querySelector(".len");
       if (len) len.textContent = `${rec.seconds} s`;
-      return;
     }
   }
 
@@ -2225,7 +2250,8 @@ class EzvizVideoCard extends HTMLElement {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       this._closeClip();
-      this._render();
+      this._syncRows();
+      this._repaintClipMedia();
     });
     return button;
   }

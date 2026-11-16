@@ -416,7 +416,9 @@ day of a camera's recordings and plays the one you tap, right in the card.
 - **Tap a recording to play it** in the card's player, with the usual video
   controls (pause, seek, full screen). Tap another to switch, or close the
   player with ✕. When it arrives the player replaces the progress bar in place:
-  the list, the page and the row you clicked stay where they were. The picture
+  the list, the page and the row you clicked stay where they were (picking a
+  row does not rebuild the card either, so the list does not jump back to its
+  top). The picture
   box takes the recording's own shape (a 4:3 doorbell clip fills the card's
   width instead of showing black bands at the sides), and the live picture does
   the same. While the clip is on its way the card shows a **progress bar**
