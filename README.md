@@ -523,8 +523,8 @@ Two websocket commands carry it, for anyone building their own UI:
 | `ezviz_rtsp/recordings` | `serial`, optional `date` (`YYYY-MM-DD`, local; today by default), optional `refresh` | `date`, `today`, `complete`, and `recordings`: newest first, each with `begin`/`end` (UTC, `20261110T083702Z`), `start` (local ISO time) and `seconds` |
 | `ezviz_rtsp/recording/clip` | `serial`, `begin`, `end`, optional `format` (`h264` default, or `hevc`) | `url`: a signed path to the MP4, valid for an hour; waits until the clip is ready |
 
-Recordings need **pyezvizapi 2.0.0**, the first release with SD playback over
-the cloud relay; see the [changelog](CHANGELOG.md).
+Recordings need **pyezvizapi 2.x** (2.5.1 is pinned), the first line of releases
+with SD playback over the cloud relay; see the [changelog](CHANGELOG.md).
 
 ## Feeding other apps (Frigate, go2rtc, …)
 

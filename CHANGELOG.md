@@ -30,11 +30,13 @@ This project follows [Semantic Versioning](https://semver.org/).
   interval and format.
 
 ### Changed
-- Requires **pyezvizapi 2.0.0** (was 1.0.5.0), which added SD playback through
-  the cloud relay. The live view follows its new module layout
-  (`pyezvizapi.streaming.cloud`; 2.0.0 removed `pyezvizapi.cloud_stream`), and
-  every other call the integration makes is unchanged in 2.0.0. Home Assistant
-  installs it on the next start.
+- Requires **pyezvizapi 2.5.1** (was 1.0.5.0). 2.0.0 added SD playback through
+  the cloud relay, which the recordings need; 2.5.1 is the current release of
+  that line and resolves cleanly against Home Assistant's own constraints (it
+  leaves `requests`, `cryptography`, `paho-mqtt` and `pycryptodome` unpinned, so
+  Home Assistant's versions are used). The live view follows the new module
+  layout (`pyezvizapi.streaming.cloud`; 2.0.0 removed
+  `pyezvizapi.cloud_stream`). Home Assistant installs it on the next start.
 - **A Repairs warning for a conflicting `pyezvizapi`.** At start-up the
   integration names any other enabled integration that pins a `pyezvizapi`
   version it cannot share (the built-in `ezviz` integration, which pins 1.x, is
