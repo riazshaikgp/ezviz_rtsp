@@ -6,7 +6,9 @@ from unittest.mock import patch
 
 import pytest
 from homeassistant.components.camera import CameraEntityFeature
+from homeassistant.config_entries import SOURCE_IGNORE
 from homeassistant.const import CONF_TYPE, CONF_URL, Platform
+from homeassistant.helpers import issue_registry as ir
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ezviz_rtsp.const import (
@@ -189,6 +191,25 @@ async def test_request_snapshot_button_updates_the_snapshot_image(hass) -> None:
     state = hass.states.get(snapshot_id)
     assert state.state != "unknown"
     assert state.attributes.get("entity_picture")
+
+
+async def test_builtin_ezviz_enabled_raises_a_repair_issue(hass) -> None:
+    from custom_components.ezviz_rtsp import BUILTIN_EZVIZ_ISSUE
+
+    # An enabled built-in ezviz entry pins another pyezvizapi major version.
+    MockConfigEntry(domain="ezviz").add_to_hass(hass)
+    await _setup(hass)
+
+    assert ir.async_get(hass).async_get_issue(DOMAIN, BUILTIN_EZVIZ_ISSUE) is not None
+
+
+async def test_builtin_ezviz_ignored_leaves_no_issue(hass) -> None:
+    from custom_components.ezviz_rtsp import BUILTIN_EZVIZ_ISSUE
+
+    MockConfigEntry(domain="ezviz", source=SOURCE_IGNORE).add_to_hass(hass)
+    await _setup(hass)
+
+    assert ir.async_get(hass).async_get_issue(DOMAIN, BUILTIN_EZVIZ_ISSUE) is None
 
 
 async def test_card_file_is_served(hass, hass_client) -> None:

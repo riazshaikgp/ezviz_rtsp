@@ -7,10 +7,12 @@ from pathlib import Path
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http.server import StaticPathConfig
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
+from homeassistant.config_entries import SOURCE_IGNORE
 from homeassistant.const import CONF_TIMEOUT, CONF_TYPE, CONF_URL, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.loader import async_get_integration
 from pyezvizapi.client import EzvizClient
 from pyezvizapi.exceptions import (
@@ -41,6 +43,12 @@ from .live import async_close_live_streams, async_setup_live_streams
 from .recordings import async_close_store, async_setup_recordings
 
 _LOGGER = logging.getLogger(__name__)
+
+# The built-in integration this one is a fork of. Both share one Python
+# environment, and therefore one pyezvizapi package, but need different major
+# versions of it, so they cannot both be set up at once.
+BUILTIN_EZVIZ_DOMAIN = "ezviz"
+BUILTIN_EZVIZ_ISSUE = "builtin_ezviz_enabled"
 
 PLATFORMS_BY_TYPE: dict[str, list] = {
     ATTR_TYPE_CAMERA: [],
@@ -89,6 +97,41 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     from .websocket import async_register_commands
 
     async_register_commands(hass)
+
+
+def _warn_about_builtin_ezviz(hass: HomeAssistant) -> None:
+    """Raise a Repairs issue while the built-in ``ezviz`` integration is enabled.
+
+    This fork and the built-in integration are two separate integrations, but they
+    share one Python environment and therefore one ``pyezvizapi`` package, and they
+    pin different major versions of it. Home Assistant installs one version per
+    environment, so whenever both are set up it reinstalls a version for whichever
+    one it processed last — and one of them is then left running against the
+    wrong library. The issue tells the user to ignore or remove the built-in one.
+    """
+    enabled = [
+        item
+        for item in hass.config_entries.async_entries(BUILTIN_EZVIZ_DOMAIN)
+        if item.source != SOURCE_IGNORE
+    ]
+    if not enabled:
+        ir.async_delete_issue(hass, DOMAIN, BUILTIN_EZVIZ_ISSUE)
+        return
+    _LOGGER.warning(
+        "The built-in %s integration is enabled and pins a different pyezvizapi "
+        "version; ignore or remove it, or this integration may run against the "
+        "wrong library",
+        BUILTIN_EZVIZ_DOMAIN,
+    )
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        BUILTIN_EZVIZ_ISSUE,
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=BUILTIN_EZVIZ_ISSUE,
+        learn_more_url="https://github.com/tarasifua/ezviz_rtsp",
+    )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EzvizConfigEntry) -> bool:
@@ -142,6 +185,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: EzvizConfigEntry) -> boo
         await _async_register_card(hass)
         # Sweep the downloaded clips now, and once a day while we run.
         await async_setup_recordings(hass)
+        # Warn if the built-in ezviz integration shares the pyezvizapi package.
+        _warn_about_builtin_ezviz(hass)
 
     # Check EZVIZ cloud account entity is present, reload
     # cloud account entities for camera entity change
