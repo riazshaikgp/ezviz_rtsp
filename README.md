@@ -483,7 +483,8 @@ day of a camera's recordings and plays the one you tap, right in the card.
   folder until you press **Check the SD card for this month**, which is the
   only part that asks the camera. A read that was on its way when the view was
   closed is kept when it arrives. A card that leaves the screen pauses its
-  player.
+  player. A background check that returns the same list only updates the day
+  label, so the card never flashes or jumps while a clip is downloading.
 
 ### Getting the latest recording on demand
 

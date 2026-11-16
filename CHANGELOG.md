@@ -67,6 +67,16 @@ This project follows [Semantic Versioning](https://semver.org/).
   the month was last checked and whether the check was complete.
 
 ### Fixed
+- **The card no longer rebuilds itself while a clip is downloading.** Opening the
+  view asks the server whether its list is still fresh; when that answer arrived
+  (a second or two later) the card threw away and re-created its whole shadow
+  tree even though it painted the same rows, which looked like the card
+  reloading mid-download and could bounce the list to the top. An answer that
+  paints the same list now only updates the day label and the refresh spinner in
+  place; the card is rebuilt only when the rows really changed. The finished
+  download also plays straight from its own result instead of asking for the
+  clip once more, so returning to the downloading row no longer flashes the
+  fetching view a second time.
 - **Coming back to a clip that is downloading shows its progress bar again.**
   Tapping another recording while one was being fetched is a queued tap, and
   tapping the fetching one again was treated the same way, so the card kept

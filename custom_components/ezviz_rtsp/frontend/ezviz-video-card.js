@@ -517,6 +517,32 @@ const style = /* css */ `
 
 const sameRecording = (a, b) => Boolean(a && b) && a.begin === b.begin && a.end === b.end;
 
+// Two day lists that would paint the same rows. A background check that changes
+// nothing must not rebuild the card: doing so while a clip is downloading looks
+// like the card reloading itself.
+const sameList = (a, b) => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.date !== b.date || a.today !== b.today || a.complete !== b.complete) return false;
+  const x = a.recordings || [];
+  const y = b.recordings || [];
+  if (x.length !== y.length) return false;
+  for (let i = 0; i < x.length; i++) {
+    const p = x[i];
+    const q = y[i];
+    if (
+      p.begin !== q.begin ||
+      p.end !== q.end ||
+      p.seconds !== q.seconds ||
+      Boolean(p.local) !== Boolean(q.local) ||
+      Boolean(p.incomplete) !== Boolean(q.incomplete)
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
 class EzvizVideoCard extends HTMLElement {
   constructor() {
     super();
@@ -1071,6 +1097,9 @@ class EzvizVideoCard extends HTMLElement {
     const media = document.createElement("div");
     media.className = "media";
     this._media = media;
+    // The day bar is updated in place when only its label changes.
+    this._recDayEl = null;
+    this._recRefreshEl = null;
 
     this._posterEl = null;
     const poster = this._posterUrl();
@@ -1338,9 +1367,11 @@ class EzvizVideoCard extends HTMLElement {
       return;
     }
     const gen = ++this._listGen;
+    const shown = this._list; // what is on screen right now
     this._listing = true;
     this._listError = "";
-    this._render();
+    if (shown) this._syncRecordingsBar();
+    else this._render();
     // One SD read per camera and day at a time. Tapping today, another day and
     // today again used to queue a camera session for every tap; a repeat now
     // joins the read already on its way. The day the server will use stands in
@@ -1375,9 +1406,23 @@ class EzvizVideoCard extends HTMLElement {
     } finally {
       if (gen === this._listGen) {
         this._listing = false;
-        this._render();
+        // Rebuilding the card for an answer that paints the same rows makes it
+        // flash (and bounce the list) for nothing - most checks land on the same
+        // list. Only the bar says that the read happened.
+        if (!this._listError && sameList(shown, this._list)) {
+          // Nothing to paint, so nothing to scroll either.
+          this._listScrollReset = false;
+          this._syncRecordingsBar();
+        } else {
+          this._render();
+        }
       }
     }
+  }
+
+  _syncRecordingsBar() {
+    if (this._recDayEl) this._recDayEl.textContent = this._recordingsLabel();
+    this._recRefreshEl?.classList.toggle("spinning", this._listing);
   }
 
   // -- the day picker ------------------------------------------------------
@@ -1637,18 +1682,18 @@ class EzvizVideoCard extends HTMLElement {
     );
     pick.classList.add("calendarbtn");
     if (this._calendarOpen) pick.classList.add("on");
-    days.append(
-      pick,
-      this._recButton(
-        "mdi:refresh",
-        t(lang, "rec_refresh"),
-        () => this._loadRecordings(true),
-        false,
-        this._listing
-      )
+    const refresh = this._recButton(
+      "mdi:refresh",
+      t(lang, "rec_refresh"),
+      () => this._loadRecordings(true),
+      false,
+      this._listing
     );
+    days.append(pick, refresh);
     bar.append(day, days);
     view.append(bar);
+    this._recDayEl = day;
+    this._recRefreshEl = refresh;
     if (this._calendarOpen) view.append(this._calendarPanel());
 
     const list = document.createElement("div");
@@ -1786,10 +1831,6 @@ class EzvizVideoCard extends HTMLElement {
       // Coming back to the clip that is downloading is not a queued tap: the
       // viewer wants the bar again, and the clip plays itself when it lands.
       const same = fetching.rec && sameRecording(fetching.rec, rec);
-      // The fetch still owns the view when nothing switched away from it, so it
-      // plays by itself; otherwise the row is remembered to be started once the
-      // camera is free.
-      const ownsView = Boolean(same) && fetching.gen === this._clipGen;
       if (!same) this._clipGen++; // the download in flight no longer owns the view
       this._clipVideo?.pause();
       this._selected = rec;
@@ -1797,9 +1838,10 @@ class EzvizVideoCard extends HTMLElement {
       this._clipError = "";
       this._clipQueued = !same;
       this._clipIncomplete = Boolean(rec.incomplete);
-      // Either way the clip is wanted: it plays as soon as the camera is free,
-      // and leaving it for another one never fetches the intermediate ones.
-      this._queuedClip = ownsView ? null : { rec, fallback };
+      // Selecting the row that is already downloading needs no queue: the fetch
+      // plays it as soon as it lands. Another row is remembered to be started
+      // then, so the intermediate ones are never fetched.
+      this._queuedClip = same ? null : { rec, fallback };
       this._stopProgress();
       this._render();
       if (same) {
@@ -1829,7 +1871,7 @@ class EzvizVideoCard extends HTMLElement {
     const format = this._recFormat(fallback);
     // The ticket remembers which recording it is fetching, so tapping that row
     // again can bring the progress bar back instead of queueing it.
-    const ticket = cloud ? { rec, format, gen } : null;
+    const ticket = cloud ? { rec, format } : null;
     if (ticket) this._clipFetching = ticket;
     this._stopProgress();
     this._render();
@@ -1838,7 +1880,7 @@ class EzvizVideoCard extends HTMLElement {
       // Another view (or another browser) may have started the live stream
       // since the list was read; release it again so the camera is free.
       await this._stopLive();
-      if (gen !== this._clipGen || !this._recordings) return;
+      if (!this._recordings || !sameRecording(this._selected, rec)) return;
       const result = await this._hass.callWS({
         type: "ezviz_rtsp/recording/clip",
         serial,
@@ -1847,7 +1889,7 @@ class EzvizVideoCard extends HTMLElement {
         format,
         keep: this._config.save_recordings !== false,
       });
-      if (gen !== this._clipGen || !this._recordings) return;
+      if (!this._recordings || !sameRecording(this._selected, rec)) return;
       this._stopProgress();
       // Only a clip the server kept (or already had) is local. A saved copy
       // that was short has just been replaced, so the warning goes too.
@@ -1862,7 +1904,7 @@ class EzvizVideoCard extends HTMLElement {
       video.onloadedmetadata = () => {
         // The camera's index can be a second or two off the file it sends;
         // once the player knows the real length, show that in the row.
-        if (gen !== this._clipGen || this._selected !== rec) return;
+        if (this._selected !== rec) return;
         const seconds = Math.round(video.duration);
         if (!Number.isFinite(seconds) || seconds <= 0) return;
         const listed = rec.seconds;
