@@ -24,8 +24,8 @@ from .live import CARD_MJPEG_TTL, card_mjpeg_path, find_stream
 from .recordings import (
     FORMATS,
     RecordingError,
+    async_clip_states,
     async_get_clip,
-    async_get_store,
     async_get_temp_clip,
     async_list_day,
     clip_path,
@@ -152,16 +152,19 @@ async def ws_recordings(
     except RecordingError as err:
         connection.send_error(msg["id"], "recordings_failed", str(err))
         return
-    store = await async_get_store(hass)
-
-    def saved(begin: datetime, end: datetime) -> bool:
-        """Whether this recording is already in the media folder, in any format."""
-        begin_stamp, end_stamp = utc_stamp(begin), utc_stamp(end)
-        return any(
-            (camera.serial, begin_stamp, end_stamp, fmt) in store.clips
-            for fmt in FORMATS
-        )
-
+    states = await async_clip_states(hass, camera.serial, recordings)
+    rows = [
+        {
+            "begin": utc_stamp(begin),
+            "end": utc_stamp(end),
+            "start": begin.isoformat(),
+            "seconds": int((end - begin).total_seconds()),
+            "local": local,
+            "incomplete": incomplete,
+        }
+        for (begin, end), (local, incomplete) in zip(recordings, states)
+    ]
+    rows.reverse()
     connection.send_result(
         msg["id"],
         {
@@ -169,16 +172,7 @@ async def ws_recordings(
             "date": day.isoformat(),
             "today": datetime.now(tz).date().isoformat(),
             "complete": complete,
-            "recordings": [
-                {
-                    "begin": utc_stamp(begin),
-                    "end": utc_stamp(end),
-                    "start": begin.isoformat(),
-                    "seconds": int((end - begin).total_seconds()),
-                    "local": saved(begin, end),
-                }
-                for begin, end in reversed(recordings)
-            ],
+            "recordings": rows,
         },
     )
 

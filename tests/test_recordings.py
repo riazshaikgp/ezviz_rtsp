@@ -356,6 +356,39 @@ async def test_list_marks_a_clip_saved_in_either_format_as_local(
     assert flags[newer["begin"]] is False
 
 
+async def test_list_marks_a_short_saved_copy_as_incomplete(
+    hass, hass_ws_client, _cloud
+) -> None:
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    tz = ZoneInfo("Africa/Johannesburg")
+    yesterday = datetime.now(tz).date() - timedelta(days=1)
+    start = datetime.combine(yesterday, datetime.min.time()) + timedelta(hours=8)
+    await _setup_with_index(hass, [start])
+    ws = await hass_ws_client(hass)
+    listing = {
+        "id": 1,
+        "type": "ezviz_rtsp/recordings",
+        "serial": "BK1",
+        "date": yesterday.isoformat(),
+    }
+    await ws.send_json(listing)
+    saved = (await ws.receive_json())["result"]["recordings"][0]
+
+    # The 8 s recording was left cut off by an old download: 2 s of MP4.
+    store = await rec_module.async_get_store(hass)
+    key = ("BK1", saved["begin"], saved["end"], "h264")
+    path = rec_module._clip_path(store, key)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(_mp4_bytes(2))
+    store.clips[key] = path
+
+    listing["id"] = 2
+    await ws.send_json(listing)
+    updated = (await ws.receive_json())["result"]["recordings"][0]
+    assert updated["local"] is True
+    assert updated["incomplete"] is True
+
+
 async def test_websocket_keeps_a_watched_clip_out_of_media_when_asked(
     hass, hass_ws_client, hass_client, _cloud, tmp_path, monkeypatch
 ) -> None:

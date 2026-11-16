@@ -129,13 +129,15 @@ const STRINGS = /* translations */ {
     "rec_partial": "{n}+ recordings (list cut short)",
     "rec_loading": "Reading the SD card…",
     "rec_fetching": "Fetching the recording from the camera…",
+    "rec_redownloading": "The saved recording is incomplete — downloading it again…",
     "rec_failed": "{msg}",
     "rec_prev": "Previous day",
     "rec_next": "Next day",
     "rec_refresh": "Refresh",
     "rec_close": "Close player",
     "rec_cloud": "On the camera's SD card (not saved locally)",
-    "rec_local": "Saved in the media folder"
+    "rec_local": "Saved in the media folder",
+    "rec_incomplete": "The saved copy is incomplete; it will be downloaded again"
   },
   "uk": {
     "play": "Дивитися",
@@ -183,13 +185,15 @@ const STRINGS = /* translations */ {
     "rec_partial": "Записів: {n}+ (список неповний)",
     "rec_loading": "Читаємо SD-картку…",
     "rec_fetching": "Завантажуємо запис із камери…",
+    "rec_redownloading": "Збережений запис неповний — завантажуємо його повторно…",
     "rec_failed": "{msg}",
     "rec_prev": "Попередній день",
     "rec_next": "Наступний день",
     "rec_refresh": "Оновити",
     "rec_close": "Закрити плеєр",
     "rec_cloud": "На SD-картці камери (не збережено локально)",
-    "rec_local": "Збережено в media"
+    "rec_local": "Збережено в media",
+    "rec_incomplete": "Збережена копія неповна; запис буде завантажено повторно"
   }
 } /* end translations */;
 
@@ -379,6 +383,7 @@ const style = /* css */ `
   .recRow .len { font-size: 12px; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; }
   .recRow .where { --mdc-icon-size: 16px; flex: 0 0 auto; color: var(--secondary-text-color); }
   .recRow .where.local { color: var(--success-color, #43a047); }
+  .recRow .where.short { color: var(--warning-color, #ff9800); }
   .recNote { padding: 16px 12px; text-align: center; font-size: 13px; color: var(--secondary-text-color); }
   .recNote.error { color: var(--error-color, #db4437); }
 
@@ -436,6 +441,7 @@ class EzvizVideoCard extends HTMLElement {
     this._listScrollReset = false; // a day change or refresh starts at the top
     this._selected = null; // the recording in the media area
     this._clipState = "idle"; // idle | fetching | playing | error
+    this._clipIncomplete = false; // the saved copy is short: say it is re-fetched
     this._clipError = "";
     this._clipFormat = "";
     this._clipGen = 0;
@@ -1352,11 +1358,22 @@ class EzvizVideoCard extends HTMLElement {
       const len = document.createElement("span");
       len.className = "len";
       len.textContent = `${rec.seconds} s`;
-      // Cloud-only clips have to be fetched; the check says one is saved.
+      // Cloud-only clips have to be fetched; the check says one is saved, and a
+      // warning says the saved copy is short and will be fetched again.
       const where = document.createElement("ha-icon");
-      where.className = "where" + (rec.local ? " local" : "");
-      where.setAttribute("icon", rec.local ? "mdi:check-circle" : "mdi:cloud-outline");
-      where.title = t(this._lang, rec.local ? "rec_local" : "rec_cloud");
+      where.className = "where" + (rec.incomplete ? " short" : rec.local ? " local" : "");
+      where.setAttribute(
+        "icon",
+        rec.incomplete
+          ? "mdi:cloud-alert"
+          : rec.local
+            ? "mdi:check-circle"
+            : "mdi:cloud-outline"
+      );
+      where.title = t(
+        this._lang,
+        rec.incomplete ? "rec_incomplete" : rec.local ? "rec_local" : "rec_cloud"
+      );
       row.append(icon, time, len, where);
       row.addEventListener("click", () => this._playRecording(rec));
       frag.append(row);
@@ -1380,6 +1397,7 @@ class EzvizVideoCard extends HTMLElement {
     this._selected = rec;
     this._clipState = "fetching";
     this._clipError = "";
+    this._clipIncomplete = Boolean(rec.incomplete);
     this._render();
     // Another view (or another browser) may have started the live stream since
     // the list was read; release it again so the camera is free for playback.
@@ -1396,8 +1414,11 @@ class EzvizVideoCard extends HTMLElement {
         keep: this._config.save_recordings !== false,
       });
       if (gen !== this._clipGen || !this._recordings) return;
-      // Only a clip the server kept (or already had) is local.
-      if (result.saved) rec.local = true;
+      // Only a clip the server kept (or already had) is local. A saved copy
+      // that was short has just been replaced, so the warning goes too.
+      rec.local = Boolean(result.saved);
+      rec.incomplete = false;
+      this._clipIncomplete = false;
       this._clipState = "playing";
       this._clipFormat = format;
       this._render();
@@ -1448,6 +1469,7 @@ class EzvizVideoCard extends HTMLElement {
     this._clipState = "idle";
     this._clipError = "";
     this._clipFormat = "";
+    this._clipIncomplete = false;
   }
 
   _ensureClipVideo() {
@@ -1470,7 +1492,10 @@ class EzvizVideoCard extends HTMLElement {
     if (this._clipState === "fetching") {
       const message = document.createElement("div");
       message.className = "message";
-      message.textContent = t(this._lang, "rec_fetching");
+      message.textContent = t(
+        this._lang,
+        this._clipIncomplete ? "rec_redownloading" : "rec_fetching"
+      );
       media.appendChild(message);
       const spinner = document.createElement("div");
       spinner.className = "spinner";

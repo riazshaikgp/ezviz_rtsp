@@ -933,6 +933,36 @@ async def _lookup_clip(
     return None
 
 
+async def async_clip_states(
+    hass: HomeAssistant, serial: str, recordings: list[tuple[datetime, datetime]]
+) -> list[tuple[bool, bool]]:
+    """For each interval: whether a copy is saved, and whether it is short.
+
+    ``incomplete`` is true when the saved MP4 is clearly shorter than the
+    interval the camera's index lists for it — a copy cut off by an interrupted
+    download. The card uses it to say that the recording is being fetched again.
+    """
+    store = await async_get_store(hass)
+
+    def states() -> list[tuple[bool, bool]]:
+        result: list[tuple[bool, bool]] = []
+        for begin, end in recordings:
+            begin_stamp, end_stamp = utc_stamp(begin), utc_stamp(end)
+            local = False
+            incomplete = False
+            for fmt in FORMATS:
+                key = (serial, begin_stamp, end_stamp, fmt)
+                path = store.clips.get(key)
+                if path is not None and path.is_file():
+                    local = True
+                    if key not in store.short and _clip_is_short(path, key):
+                        incomplete = True
+            result.append((local, incomplete))
+        return result
+
+    return await hass.async_add_executor_job(states)
+
+
 async def async_get_clip(
     hass: HomeAssistant, camera: Camera, begin: datetime, end: datetime, fmt: str
 ) -> Path:

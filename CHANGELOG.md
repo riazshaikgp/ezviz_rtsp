@@ -90,6 +90,11 @@ This project follows [Semantic Versioning](https://semver.org/).
   bottom of the list used to re-render the card and scroll the list back to the
   first recording while the clip was fetched and played. The list now keeps its
   position; the ⟳ button and a day change still start at the top.
+- **The card says when it re-downloads an incomplete saved clip.** A saved copy
+  whose MP4 is clearly shorter than its interval gets an orange alert cloud in
+  the list, and while it is replaced the card shows "The saved recording is
+  incomplete — downloading it again…" instead of the usual fetching message.
+  The row turns back into a green check once the fresh copy is in place.
 - **A camera busy with another viewer (EZVIZ 5405) gets a few seconds.** Playback
   is retried twice, two seconds apart, before the card shows the error — enough
   for the relay to release a live session the card just stopped. The message now

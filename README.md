@@ -424,8 +424,12 @@ day of a camera's recordings and plays the one you tap, right in the card.
   because HEVC does not.
 - At the right of each row, a small icon says where the clip is: a **cloud** for
   one that still has to be fetched from the camera, a green **check** for one
-  already saved under `media/ezviz_rtsp/` (in either format). It turns into a
-  check as soon as you play the clip.
+  already saved under `media/ezviz_rtsp/` (in either format), and an orange
+  **alert cloud** for a saved copy that is shorter than its interval and will be
+  replaced on the next play. It turns into a check as soon as you play the clip.
+  When an incomplete copy is being replaced, the card says **"The saved
+  recording is incomplete — downloading it again…"** instead of the usual
+  fetching message.
 - **Watching a clip saves it by default.** Turn **Save watched recordings**
   (`save_recordings: false`) off in the card's settings to keep the media folder
   clean: a watched recording is then fetched into a temporary folder, plays the
@@ -712,8 +716,10 @@ The length in the list comes from the camera's SD index. A file saved by an
 older version may have been cut off by the fixed transfer window: the card reads
 the MP4's real duration, and if it is clearly shorter than the interval, fetches
 the recording again automatically (once; a clip the camera itself sends short is
-kept as it is and not fetched on every play). The transfer window now grows with
-the recording, so a long clip is not cut off while it is still arriving. Once a
+kept as it is and not fetched on every play). Such a row shows an orange alert
+cloud, and while it is fetched again the card says **"The saved recording is
+incomplete — downloading it again…"**. The transfer window now grows with the
+recording, so a long clip is not cut off while it is still arriving. Once a
 clip plays, the row shows the file's real duration, with the listed length in
 its tooltip when they differ. If a clip is still much shorter, the camera itself
 sent a shorter file; the integration log
