@@ -67,6 +67,14 @@ This project follows [Semantic Versioning](https://semver.org/).
   the month was last checked and whether the check was complete.
 
 ### Fixed
+- **A finished day is read from the SD card only once, even across restarts.**
+  Past-day lists lived only in memory, so after every restart opening yesterday,
+  the day before, and so on, woke the camera again for each day. A day read
+  after it ended (its index cannot change any more) is now saved in Home
+  Assistant's `.storage` (`ezviz_rtsp.day_lists`) and restored with the media
+  index, so opening it is instant and silent. An empty day is saved too. A day
+  read only while it was still running is read once more after midnight, because
+  its list could still have grown; ⟳ still asks the camera again.
 - **Playing a recording right after watching live no longer fails.** The card
   used to drop its own picture but leave the integration's cloud session open
   for the configured *Release the camera after* delay, so the first SD-card

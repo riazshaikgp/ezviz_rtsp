@@ -1188,6 +1188,86 @@ async def test_a_fetch_publishes_progress_and_clears_it(hass, _cloud) -> None:
     assert path.exists()
 
 
+async def test_a_finished_past_day_survives_a_restart(
+    hass, _cloud, hass_storage
+) -> None:
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    tz = ZoneInfo("Africa/Johannesburg")
+    yesterday = datetime.now(tz).date() - timedelta(days=1)
+    start = datetime.combine(yesterday, datetime.min.time()) + timedelta(hours=8)
+    _entry, index = await _setup_with_index(hass, [start])
+    camera = rec_module.find_camera(hass, "BK1")
+
+    first, complete = await rec_module.async_list_day(hass, camera, yesterday)
+    assert complete and len(first) == 1
+    assert "ezviz_rtsp.day_lists" in hass_storage
+    assert len(index.calls) == 1
+
+    # A restart forgets the in-memory cache; the stored list answers instead.
+    hass.data.pop(rec_module.DATA_RECORDINGS)
+    hass.data.pop(rec_module.DATA_LISTS)
+    hass.data.pop(rec_module.DATA_LISTS_STORE)
+    again, complete = await rec_module.async_list_day(hass, camera, yesterday)
+
+    assert again == first and complete
+    assert len(index.calls) == 1, "the finished day is not read from the camera again"
+
+
+async def test_an_empty_finished_day_is_not_read_again(
+    hass, _cloud, hass_storage
+) -> None:
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    tz = ZoneInfo("Africa/Johannesburg")
+    yesterday = datetime.now(tz).date() - timedelta(days=1)
+    _entry, index = await _setup_with_index(hass, [])
+    camera = rec_module.find_camera(hass, "BK1")
+
+    assert await rec_module.async_list_day(hass, camera, yesterday) == ([], True)
+    hass.data.pop(rec_module.DATA_RECORDINGS)
+    hass.data.pop(rec_module.DATA_LISTS)
+    hass.data.pop(rec_module.DATA_LISTS_STORE)
+
+    assert await rec_module.async_list_day(hass, camera, yesterday) == ([], True)
+    assert len(index.calls) == 1, "even an empty finished day is not read again"
+
+
+async def test_a_day_read_before_it_ended_is_read_again(hass, _cloud) -> None:
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    tz = ZoneInfo("Africa/Johannesburg")
+    yesterday = datetime.now(tz).date() - timedelta(days=1)
+    start = datetime.combine(yesterday, datetime.min.time()) + timedelta(hours=8)
+    _entry, index = await _setup_with_index(hass, [start])
+    camera = rec_module.find_camera(hass, "BK1")
+    store = await rec_module.async_get_store(hass)
+    # The list was read while the day was still running: it may miss its end.
+    store.days[("BK1", yesterday)] = rec_module._Day(
+        [], time.monotonic(), True, False
+    )
+
+    recordings, complete = await rec_module.async_list_day(hass, camera, yesterday)
+
+    assert complete and len(recordings) == 1
+    assert len(index.calls) == 1, "the day is read once it is over"
+    assert store.days[("BK1", yesterday)].final is True
+    # Now it is settled: another open reads the cache.
+    await rec_module.async_list_day(hass, camera, yesterday)
+    assert len(index.calls) == 1
+
+
+async def test_refresh_reads_a_finished_past_day_again(hass, _cloud) -> None:
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    tz = ZoneInfo("Africa/Johannesburg")
+    yesterday = datetime.now(tz).date() - timedelta(days=1)
+    start = datetime.combine(yesterday, datetime.min.time()) + timedelta(hours=8)
+    _entry, index = await _setup_with_index(hass, [start])
+    camera = rec_module.find_camera(hass, "BK1")
+
+    await rec_module.async_list_day(hass, camera, yesterday)
+    await rec_module.async_list_day(hass, camera, yesterday, refresh=True)
+
+    assert len(index.calls) == 2, "⟳ still asks the camera again"
+
+
 def test_day_has_records_asks_for_one_record() -> None:
     day = date(2026, 10, 3)
     index = FakeIndex([datetime(2026, 10, 3, 8, 0)])

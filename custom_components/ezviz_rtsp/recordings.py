@@ -124,6 +124,9 @@ class _Day:
     recordings: list[tuple[datetime, datetime]]
     fetched: float
     complete: bool
+    # Read after the local day was over, so the SD index cannot grow any more
+    # for it. A list read during its own day is not final and is read again.
+    final: bool = False
 
 
 @dataclass
@@ -177,6 +180,15 @@ DATA_SHORT_LOCK = f"{DOMAIN}_short_clips_lock"
 DATA_SHORT_STORE = f"{DOMAIN}_short_clips_store"
 SHORT_STORAGE_KEY = f"{DOMAIN}.short_clips"
 SHORT_STORAGE_VERSION = 1
+# Days already read after they ended: the SD index cannot change for them, so
+# they are kept across restarts and never read from the camera again.
+DATA_LISTS = f"{DOMAIN}_day_lists"
+DATA_LISTS_LOCK = f"{DOMAIN}_day_lists_lock"
+DATA_LISTS_STORE = f"{DOMAIN}_day_lists_store"
+LISTS_STORAGE_KEY = f"{DOMAIN}.day_lists"
+LISTS_STORAGE_VERSION = 1
+# A year and a bit; the SD card does not hold more than that anyway.
+DAY_LISTS_KEEP_DAYS = 400
 # How often the downloaded clips are swept on top of the start-up sweep.
 PRUNE_INTERVAL = timedelta(days=1)
 
@@ -410,6 +422,67 @@ def _replace_clip(part: Path, target: Path) -> None:
         raise
 
 
+async def _lists_cache(hass: HomeAssistant) -> tuple[dict[str, Any], Store]:
+    """The persisted past-day lists, loaded from Home Assistant's storage once."""
+    if (data := hass.data.get(DATA_LISTS)) is not None:
+        return data, hass.data[DATA_LISTS_STORE]
+    lock: asyncio.Lock = hass.data.setdefault(DATA_LISTS_LOCK, asyncio.Lock())
+    async with lock:
+        if (data := hass.data.get(DATA_LISTS)) is not None:
+            return data, hass.data[DATA_LISTS_STORE]
+        storage: Store = Store(hass, LISTS_STORAGE_VERSION, LISTS_STORAGE_KEY)
+        data = await storage.async_load() or {}
+        hass.data[DATA_LISTS] = data
+        hass.data[DATA_LISTS_STORE] = storage
+        return data, storage
+
+
+async def _save_day_list(
+    hass: HomeAssistant, serial: str, day: date, recordings: list[tuple[datetime, datetime]]
+) -> None:
+    """Remember a finished day's list, so a restart does not re-read the card."""
+    data, storage = await _lists_cache(hass)
+    cutoff = (
+        datetime.now(ZoneInfo(hass.config.time_zone)).date()
+        - timedelta(days=DAY_LISTS_KEEP_DAYS)
+    ).isoformat()
+    async with hass.data[DATA_LISTS_LOCK]:
+        per_camera = data.setdefault("lists", {}).setdefault(serial, {})
+        per_camera[day.isoformat()] = [
+            [utc_stamp(begin), utc_stamp(end)] for begin, end in recordings
+        ]
+        for text in [text for text in per_camera if text < cutoff]:
+            per_camera.pop(text, None)
+        await storage.async_save(data)
+
+
+async def _load_day_lists(hass: HomeAssistant, store: RecordingStore) -> None:
+    """Restore the finished days' lists into the in-memory cache."""
+    data, _ = await _lists_cache(hass)
+    lists = data.get("lists")
+    if not isinstance(lists, dict):
+        return
+    today = datetime.now(ZoneInfo(hass.config.time_zone)).date()
+    for serial, days in lists.items():
+        if not isinstance(days, dict):
+            continue
+        for text, rows in days.items():
+            try:
+                day = date.fromisoformat(text)
+            except (TypeError, ValueError):
+                continue
+            # A "day" that is today again (the clock moved back) can still grow.
+            if day >= today or not isinstance(rows, list):
+                continue
+            recordings: list[tuple[datetime, datetime]] = []
+            try:
+                for row in rows:
+                    recordings.append((parse_stamp(str(row[0])), parse_stamp(str(row[1]))))
+            except (KeyError, IndexError, RecordingError, TypeError):
+                continue
+            store.days[(serial, day)] = _Day(recordings, 0.0, True, True)
+
+
 async def _short_cache(hass: HomeAssistant) -> tuple[dict[str, Any], Store]:
     """The clips the camera sent short, loaded from Home Assistant's storage once."""
     if (data := hass.data.get(DATA_SHORT)) is not None:
@@ -461,6 +534,7 @@ async def async_get_store(hass: HomeAssistant) -> RecordingStore:
             _prepare_store, media_root(hass), ZoneInfo(hass.config.time_zone)
         )
         await _load_short(hass, store)
+        await _load_day_lists(hass, store)
         hass.data[DATA_RECORDINGS] = store
         return store
 
@@ -551,6 +625,8 @@ async def async_close_store(hass: HomeAssistant) -> None:
     hass.data.pop(DATA_RECORDINGS_LOCK, None)
     hass.data.pop(DATA_SHORT, None)
     hass.data.pop(DATA_SHORT_STORE, None)
+    hass.data.pop(DATA_LISTS, None)
+    hass.data.pop(DATA_LISTS_STORE, None)
     if (unsub := hass.data.pop(DATA_RECORDINGS_TIMER, None)) is not None:
         unsub()
 
@@ -700,8 +776,14 @@ async def async_list_day(
     cached = store.days.get(key)
     loop_now = time.monotonic()
     if cached is not None and not refresh:
-        past = day < now.date()
-        if past or loop_now - cached.fetched < TODAY_TTL:
+        if day < now.date():
+            # A past day is settled only when the list was read after it ended;
+            # one read during the day may still be missing its last clips.
+            if cached.final and cached.complete:
+                if cached.recordings:
+                    store.seen.add((camera.serial, day))
+                return cached.recordings, cached.complete
+        elif loop_now - cached.fetched < TODAY_TTL:
             if cached.recordings:
                 store.seen.add((camera.serial, day))
             return cached.recordings, cached.complete
@@ -747,9 +829,16 @@ async def _read_day(
         recordings, complete = await hass.async_add_executor_job(
             search_day, camera.coordinator.ezviz_client, camera.serial, day, tz, now
         )
-    store.days[(camera.serial, day)] = _Day(recordings, time.monotonic(), complete)
+    final = day < now.date()
+    store.days[(camera.serial, day)] = _Day(
+        recordings, time.monotonic(), complete, final
+    )
     if recordings:
         store.seen.add((camera.serial, day))
+    if final and complete:
+        # The day is over and the whole list is here: from now on, even after a
+        # restart, opening it must not wake the camera again.
+        await _save_day_list(hass, camera.serial, day, recordings)
     return recordings, complete
 
 

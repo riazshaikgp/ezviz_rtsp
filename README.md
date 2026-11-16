@@ -466,8 +466,12 @@ day of a camera's recordings and plays the one you tap, right in the card.
   media folder until you press **Check the SD card for this month**, which is
   the only part that asks the camera. Switching days quickly shares the read
   already on its way instead of starting another camera session for every tap.
-  The ⟳ button always reads the camera again, and a past day stays cached. A
-  card that leaves the screen pauses its player.
+  The ⟳ button always reads the camera again. A **past day** is read from the
+  camera once after it has ended and then kept in Home Assistant's `.storage`
+  (key `ezviz_rtsp.day_lists`), so opening it later — even after a restart — is
+  instant and does not wake the camera. A day that was only read while it was
+  still running is read once more after midnight, since its list could still
+  have grown. A card that leaves the screen pauses its player.
 
 ### Getting the latest recording on demand
 
