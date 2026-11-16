@@ -8,9 +8,10 @@ This project follows [Semantic Versioning](https://semver.org/).
 ### Added
 - **SD-card recordings.** The **filmstrip button next to the battery level**
   switches the **EZVIZ Video** card between the live view and one day of a
-  camera's SD-card recordings, newest first, with buttons for earlier days and
-  the one you tap playing in the same media area. Behind it are two websocket
-  commands (`ezviz_rtsp/recordings`, `ezviz_rtsp/recording/clip`) and an
+  camera's SD-card recordings, newest first, with a month calendar for picking
+  the day and the one you tap playing in the same media area. Behind it are
+  three websocket commands (`ezviz_rtsp/recordings`,
+  `ezviz_rtsp/recording/days`, `ezviz_rtsp/recording/clip`) and an
   authenticated MP4 view with range requests. A recording is fetched from the
   camera through the EZVIZ cloud only when it is tapped, saved as an MP4 under
   Home Assistant's media folder (`media/ezviz_rtsp/`, browsable under **Media →
@@ -45,6 +46,18 @@ This project follows [Semantic Versioning](https://semver.org/).
   recording you watch is fetched into a temporary folder, deleted after about two
   hours and kept out of **Media** (no green check, no retention); a clip saved
   earlier still plays from its permanent copy.
+- **A calendar for picking the day of the recordings.** The card's day arrows
+  are gone: a calendar button opens a Monday-first month grid, and tapping a day
+  loads its recordings. Future days are disabled and today is emphasised.
+- **Dots on the days that have a recording.** A green dot marks a day whose
+  clips are already saved in the media folder — free to know and kept across
+  restarts. **Check the SD card for this month** asks the camera about the month
+  one day at a time and adds blue dots for days whose clips exist only on the
+  card; the answer is cached in Home Assistant's `.storage` (key
+  `ezviz_rtsp.recording_days`, about a kilobyte per camera and month), so the
+  dots survive a restart without waking the camera. A scan that reaches its time
+  budget keeps the days found so far and can be run again; the picker says when
+  the month was last checked and whether the check was complete.
 
 ### Fixed
 - **Playing a recording right after watching live no longer fails.** The card

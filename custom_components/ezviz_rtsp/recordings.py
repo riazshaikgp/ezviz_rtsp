@@ -45,6 +45,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.http import KEY_HASS, HomeAssistantView
+from homeassistant.helpers.storage import Store
 
 from .const import (
     ATTR_TYPE_CLOUD,
@@ -67,6 +68,9 @@ PAGE_SIZE = 50
 MAX_PAGES = 40
 # A past day's list is kept until the card asks for a refresh; today's for this long.
 TODAY_TTL = 60.0
+# The calendar marks a whole month by one search per day (the SD index has no
+# summary of which days are busy). This bounds an explicit scan.
+MONTH_SCAN_SECONDS = 40.0
 # The camera channel recordings are searched and replayed on (0 is refused).
 CHANNEL = 1
 # A sleeping camera answers its first search with EZVIZ error 2009; retry once after this long.
@@ -140,6 +144,8 @@ class RecordingStore:
     # Clips the camera itself sends shorter than the index, even after a retry:
     # play them as they are instead of fetching them again on every play.
     short: set[tuple[str, str, str, str]] = field(default_factory=set)
+    # Days whose SD list this run has seen with recordings, for the calendar.
+    seen: set[tuple[str, date]] = field(default_factory=set)
     # One SD request per camera at a time: EZVIZ refuses parallel sessions.
     locks: dict[str, asyncio.Lock] = field(default_factory=dict)
 
@@ -151,6 +157,12 @@ class RecordingStore:
 DATA_RECORDINGS = f"{DOMAIN}_recordings"
 DATA_RECORDINGS_LOCK = f"{DOMAIN}_recordings_lock"
 DATA_RECORDINGS_TIMER = f"{DOMAIN}_recordings_timer"
+# The calendar's month scan survives restarts in Home Assistant's storage.
+DATA_DAYS = f"{DOMAIN}_recording_days"
+DATA_DAYS_LOCK = f"{DOMAIN}_recording_days_lock"
+DATA_DAYS_STORE = f"{DOMAIN}_recording_days_store"
+DAYS_STORAGE_KEY = f"{DOMAIN}.recording_days"
+DAYS_STORAGE_VERSION = 1
 # How often the downloaded clips are swept on top of the start-up sweep.
 PRUNE_INTERVAL = timedelta(days=1)
 
@@ -626,6 +638,8 @@ async def async_list_day(
     if cached is not None and not refresh:
         past = day < now.date()
         if past or loop_now - cached.fetched < TODAY_TTL:
+            if cached.recordings:
+                store.seen.add((camera.serial, day))
             return cached.recordings, cached.complete
     if day > now.date():
         return [], True
@@ -634,7 +648,183 @@ async def async_list_day(
             search_day, camera.coordinator.ezviz_client, camera.serial, day, tz, now
         )
     store.days[key] = _Day(recordings, time.monotonic(), complete)
+    if recordings:
+        store.seen.add((camera.serial, day))
     return recordings, complete
+
+
+# -- the calendar's days -----------------------------------------------------------
+
+
+def _local_days(
+    store: RecordingStore, serial: str, year: int, month: int, tz: ZoneInfo
+) -> set[date]:
+    """Days of a month that already have a saved MP4, in the camera's local time."""
+    days: set[date] = set()
+    for (clip_serial, begin, _end, _fmt) in store.clips:
+        if clip_serial != serial:
+            continue
+        moment = parse_stamp(begin).astimezone(tz)
+        if moment.year == year and moment.month == month:
+            days.add(moment.date())
+    return days
+
+
+def day_has_records(
+    client: Any, serial: str, day: date, tz: ZoneInfo, now: datetime
+) -> bool:
+    """Whether the SD index has a recording on ``day``. Blocking.
+
+    One record is enough for a calendar dot, so this asks for a single result
+    instead of paging a whole day. A sleeping camera's first search is retried
+    like the day list's.
+    """
+    from pyezvizapi.exceptions import PyEzvizError
+
+    start = datetime.combine(day, datetime.min.time(), tz)
+    end = min(start + timedelta(days=1), now.astimezone(tz).replace(microsecond=0))
+    if start >= end:
+        return False
+    retried = False
+    while True:
+        try:
+            answer = client.search_records_v2(
+                serial,
+                CHANNEL,
+                start.strftime("%Y-%m-%d %H:%M:%S"),
+                end.strftime("%Y-%m-%d %H:%M:%S"),
+                size=1,
+            )
+        except PyEzvizError as err:
+            if "2009" not in str(err) or retried:
+                raise RecordingError(_explain(err)) from err
+            retried = True
+            time.sleep(WAKE_RETRY_SECONDS)
+            continue
+        records, _ = decode_records(answer)
+        for record in records:
+            if not isinstance(record, Mapping):
+                continue
+            begin = _local(record.get("B"), tz)
+            if begin is not None and begin.date() == day:
+                return True
+        return False
+
+
+def scan_month_days(
+    client: Any,
+    serial: str,
+    first: date,
+    last: date,
+    tz: ZoneInfo,
+    now: datetime,
+    skip: set[date],
+) -> tuple[set[date], bool]:
+    """Which days of a month have SD recordings; one search per day. Blocking.
+
+    ``skip`` holds days already known from media (their dot is green anyway), so
+    the camera is not asked about them. The scan stops at its time budget and
+    reports itself incomplete rather than making a long battery-camera session.
+    """
+    found: set[date] = set()
+    deadline = time.monotonic() + MONTH_SCAN_SECONDS
+    day = first
+    while day <= last:
+        if day not in skip:
+            if time.monotonic() >= deadline:
+                return found, False
+            if day_has_records(client, serial, day, tz, now):
+                found.add(day)
+        day += timedelta(days=1)
+    return found, True
+
+
+async def _days_cache(hass: HomeAssistant) -> tuple[dict[str, Any], Store]:
+    """The month-scan cache, loaded from Home Assistant's storage once."""
+    if (data := hass.data.get(DATA_DAYS)) is not None:
+        return data, hass.data[DATA_DAYS_STORE]
+    lock: asyncio.Lock = hass.data.setdefault(DATA_DAYS_LOCK, asyncio.Lock())
+    async with lock:
+        if (data := hass.data.get(DATA_DAYS)) is not None:
+            return data, hass.data[DATA_DAYS_STORE]
+        storage: Store = Store(hass, DAYS_STORAGE_VERSION, DAYS_STORAGE_KEY)
+        data = await storage.async_load() or {}
+        hass.data[DATA_DAYS] = data
+        hass.data[DATA_DAYS_STORE] = storage
+        return data, storage
+
+
+async def async_month_days(
+    hass: HomeAssistant, camera: Camera, year: int, month: int, *, scan: bool
+) -> dict[str, Any]:
+    """The days of one month that have local clips and SD recordings.
+
+    Local days come from the media folder and are free; SD days come from the
+    persistent cache and from days already looked at this run. ``scan`` asks the
+    camera about the month and saves the answer, so it survives a restart.
+    """
+    store = await async_get_store(hass)
+    tz = ZoneInfo(hass.config.time_zone)
+    now = datetime.now(tz)
+    local = _local_days(store, camera.serial, year, month, tz)
+    seen = {
+        day
+        for (clip_serial, day) in store.seen
+        if clip_serial == camera.serial and day.year == year and day.month == month
+    }
+    month_key = f"{year:04d}-{month:02d}"
+    data, storage = await _days_cache(hass)
+    cached = (data.get(camera.serial) or {}).get(month_key)
+    if scan:
+        first = date(year, month, 1)
+        after = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+        last = min(after - timedelta(days=1), now.date())
+        if first <= last:
+            from .live import find_stream
+
+            async with store.lock(camera.serial):
+                live = find_stream(hass, camera.serial)
+                if live is not None and live.active:
+                    raise RecordingError(
+                        "The camera is streaming live; stop the live view first"
+                    )
+                found, complete = await hass.async_add_executor_job(
+                    scan_month_days,
+                    camera.coordinator.ezviz_client,
+                    camera.serial,
+                    first,
+                    last,
+                    tz,
+                    now,
+                    local,
+                )
+        else:
+            found, complete = set(), True
+        # An incomplete scan keeps the days found by earlier ones.
+        old: set[date] = set()
+        for text in (cached or {}).get("days", []):
+            with contextlib.suppress(ValueError):
+                old.add(date.fromisoformat(text))
+        days = found if complete else old | found
+        entry = {
+            "days": sorted(day.isoformat() for day in days),
+            "scanned": now.isoformat(),
+            "complete": complete,
+        }
+        async with hass.data[DATA_DAYS_LOCK]:
+            data.setdefault(camera.serial, {})[month_key] = entry
+            await storage.async_save(data)
+        cached = entry
+    card = set(seen)
+    for text in (cached or {}).get("days", []):
+        with contextlib.suppress(ValueError):
+            card.add(date.fromisoformat(text))
+    return {
+        "local": sorted(day.isoformat() for day in local),
+        "card": sorted(day.isoformat() for day in card),
+        "scanned": cached.get("scanned") if cached else None,
+        "complete": bool(cached.get("complete")) if cached else False,
+    }
 
 
 # -- replay ----------------------------------------------------------------------

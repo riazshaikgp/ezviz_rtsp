@@ -28,6 +28,7 @@ from .recordings import (
     async_get_clip,
     async_get_temp_clip,
     async_list_day,
+    async_month_days,
     clip_path,
     find_camera,
     parse_stamp,
@@ -44,6 +45,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
     async_register_command(hass, ws_get_devices)
     async_register_command(hass, ws_live_stop)
     async_register_command(hass, ws_recordings)
+    async_register_command(hass, ws_recording_days)
     async_register_command(hass, ws_recording_clip)
 
 
@@ -174,6 +176,49 @@ async def ws_recordings(
             "complete": complete,
             "recordings": rows,
         },
+    )
+
+
+@websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/recording/days",
+        vol.Required("serial"): str,
+        vol.Required("month"): str,  # YYYY-MM
+        # Ask the camera about every day; without it only local and cached days
+        # (and days already looked at this run) are returned.
+        vol.Optional("scan", default=False): bool,
+    }
+)
+@async_response
+async def ws_recording_days(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Which days of a month have recordings, for the card's calendar."""
+    camera = find_camera(hass, msg["serial"])
+    if camera is None:
+        connection.send_error(msg["id"], "not_found", "Camera not found in a loaded account")
+        return
+    try:
+        parts = msg["month"].split("-")
+        if len(parts) != 2:
+            raise ValueError
+        year, month = (int(part) for part in parts)
+        date(year, month, 1)
+    except (TypeError, ValueError):
+        connection.send_error(msg["id"], "invalid_format", "month must be YYYY-MM")
+        return
+    now = datetime.now(ZoneInfo(hass.config.time_zone))
+    if (year, month) > (now.year, now.month):
+        connection.send_error(msg["id"], "invalid_format", "The month is in the future")
+        return
+    try:
+        result = await async_month_days(hass, camera, year, month, scan=msg["scan"])
+    except RecordingError as err:
+        connection.send_error(msg["id"], "days_failed", str(err))
+        return
+    connection.send_result(
+        msg["id"],
+        {"serial": camera.serial, "month": msg["month"], **result},
     )
 
 

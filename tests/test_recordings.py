@@ -944,6 +944,96 @@ def test_a_whole_download_is_not_fetched_twice(monkeypatch) -> None:
     assert opener.call_count == 1
 
 
+def test_day_has_records_asks_for_one_record() -> None:
+    day = date(2026, 10, 3)
+    index = FakeIndex([datetime(2026, 10, 3, 8, 0)])
+    now = datetime(2026, 11, 17, 12, 0, tzinfo=TZ)
+
+    assert rec_module.day_has_records(index, "BB1", day, TZ, now) is True
+    assert rec_module.day_has_records(index, "BB1", date(2026, 10, 4), TZ, now) is False
+
+
+async def test_month_days_lists_the_days_with_saved_clips(hass, _cloud) -> None:
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    camera = rec_module.find_camera(hass, "BK1")
+    key = ("BK1", "20261003T080000Z", "20261003T080008Z", "h264")
+    saved = rec_module._clip_path(store, key)
+    saved.parent.mkdir(parents=True)
+    saved.write_bytes(b"mp4")
+    store.clips[key] = saved
+
+    result = await rec_module.async_month_days(hass, camera, 2026, 10, scan=False)
+
+    assert result["local"] == ["2026-10-03"]
+    assert result["card"] == []
+    assert result["scanned"] is None
+
+
+async def test_month_scan_marks_days_and_persists(
+    hass, _cloud, hass_storage
+) -> None:
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    starts = [datetime(2026, 10, 3, 8, 0), datetime(2026, 10, 20, 9, 0)]
+    await _setup_with_index(hass, starts)
+    camera = rec_module.find_camera(hass, "BK1")
+
+    result = await rec_module.async_month_days(hass, camera, 2026, 10, scan=True)
+
+    assert result["local"] == []
+    assert result["card"] == ["2026-10-03", "2026-10-20"]
+    assert result["complete"] is True
+    assert result["scanned"] is not None
+    assert "ezviz_rtsp.recording_days" in hass_storage
+
+    # A restart forgets the in-memory cache; the stored scan answers again
+    # without asking the camera (no FakeIndex records would be needed).
+    hass.data.pop(rec_module.DATA_DAYS)
+    hass.data.pop(rec_module.DATA_DAYS_STORE)
+    again = await rec_module.async_month_days(hass, camera, 2026, 10, scan=False)
+    assert again["card"] == ["2026-10-03", "2026-10-20"]
+
+
+async def test_websocket_lists_days_for_the_calendar(
+    hass, hass_ws_client, _cloud
+) -> None:
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    await _setup_with_index(hass, [datetime(2026, 10, 3, 8, 0)])
+    ws = await hass_ws_client(hass)
+
+    await ws.send_json(
+        {"id": 1, "type": "ezviz_rtsp/recording/days", "serial": "BK1", "month": "2026-10"}
+    )
+    msg = await ws.receive_json()
+    assert msg["success"], msg
+    assert msg["result"]["card"] == []
+    assert msg["result"]["local"] == []
+
+    await ws.send_json(
+        {
+            "id": 2,
+            "type": "ezviz_rtsp/recording/days",
+            "serial": "BK1",
+            "month": "2026-10",
+            "scan": True,
+        }
+    )
+    msg = await ws.receive_json()
+    assert msg["success"], msg
+    assert msg["result"]["card"] == ["2026-10-03"]
+    assert msg["result"]["complete"] is True
+
+    await ws.send_json(
+        {"id": 3, "type": "ezviz_rtsp/recording/days", "serial": "BK1", "month": "nope"}
+    )
+    assert (await ws.receive_json())["error"]["code"] == "invalid_format"
+    await ws.send_json(
+        {"id": 4, "type": "ezviz_rtsp/recording/days", "serial": "BK1", "month": "2999-01"}
+    )
+    assert (await ws.receive_json())["error"]["code"] == "invalid_format"
+
+
 async def test_flat_clips_are_migrated_into_day_folders(hass, _cloud) -> None:
     await _setup_with_index(hass, [])
     store = await rec_module.async_get_store(hass)

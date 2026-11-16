@@ -397,15 +397,17 @@ day of a camera's recordings and plays the one you tap, right in the card.
   The integration is asked to **release the cloud session at once** rather than
   after the configured *Release the camera after* delay, so the first tap works
   immediately — the card does not wait the 10 seconds a normal stop would.
-- The day arrows, hour grouping and the ✕ player are the card's own; the
+- The calendar, hour grouping and the ✕ player are the card's own; the
   recording format follows the browser (HEVC when it plays it, H.264
   otherwise), and a failed HEVC clip is retried in H.264. The `format` and
   `max_height` options are in the table above.
 
 ### Using it
 
-- The card opens on **today**. The arrows in the header go to earlier days (and
-  back, up to today); the refresh button searches the camera again.
+- The card opens on **today**. The **calendar button** in the header opens a
+  month grid: tap a day to see its recordings, and use the arrows inside the
+  picker to go to another month. Future days cannot be picked. The refresh
+  button searches the camera again.
 - Recordings are listed **newest first, grouped by hour**, each with its start
   time and length. A camera that records motion events typically shows clips of
   8–16 seconds; a busy camera can have a few hundred a day.
@@ -427,6 +429,16 @@ day of a camera's recordings and plays the one you tap, right in the card.
   backup, a copy made by hand). An **H.264** copy also answers a request for
   HEVC, since H.264 plays in every browser; the other way round is not done,
   because HEVC does not.
+- **The calendar marks the days that have a recording.** A **green dot** means
+  clips from that day are already saved in the media folder — those days are
+  known without touching the camera and survive every restart. Days with
+  recordings only on the camera's SD card get a **blue dot**, which needs the
+  camera to be asked: press **Check the SD card for this month** in the picker
+  and it searches each day of that month once, showing progress and how long the
+  result is kept. The answer is stored in Home Assistant's `.storage`, so after
+  a restart the dots are back without waking the camera; a scan that runs out of
+  time keeps the days it found and can be run again. The camera is never asked
+  about a month just by opening the picker.
 - At the right of each row, a small icon says where the clip is: a **cloud** for
   one that still has to be fetched from the camera, a green **check** for one
   already saved under `media/ezviz_rtsp/` (in either format), and an orange
@@ -441,12 +453,15 @@ day of a camera's recordings and plays the one you tap, right in the card.
   same, is deleted after about two hours and never appears under **Media**. It
   does not get a green check, and the retention setting does not apply to it. A
   clip already saved earlier still plays from its permanent copy.
-- The **SD card is read only when the mode is opened**, because listing wakes a
+- **The SD card is read only when the mode is opened**, because listing wakes a
   battery camera. **A page reload (a new card) reads the day again**, and so does
   reopening the view when today's list is more than a minute old; reopening
   sooner uses what is already here, so toggling the view does not wake the
-  camera every time. The ⟳ button always reads the camera again, and a past day
-  stays cached. A card that leaves the screen pauses its player.
+  camera every time. The calendar's month dots are read from the cache and the
+  media folder until you press **Check the SD card for this month**, which is
+  the only part that asks the camera. The ⟳ button always reads the camera
+  again, and a past day stays cached. A card that leaves the screen pauses its
+  player.
 
 ### Getting the latest recording on demand
 

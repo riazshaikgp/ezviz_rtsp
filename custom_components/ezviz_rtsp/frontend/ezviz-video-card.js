@@ -132,13 +132,22 @@ const STRINGS = /* translations */ {
     "rec_redownloading": "The saved recording is incomplete — downloading it again…",
     "rec_queued": "Waiting for the current recording to finish…",
     "rec_failed": "{msg}",
-    "rec_prev": "Previous day",
-    "rec_next": "Next day",
     "rec_refresh": "Refresh",
     "rec_close": "Close player",
     "rec_cloud": "On the camera's SD card (not saved locally)",
     "rec_local": "Saved in the media folder",
-    "rec_incomplete": "The saved copy is incomplete; it will be downloaded again"
+    "rec_incomplete": "The saved copy is incomplete; it will be downloaded again",
+    "rec_calendar": "Pick a day",
+    "rec_prev_month": "Previous month",
+    "rec_next_month": "Next month",
+    "rec_scan": "Check the SD card for this month",
+    "rec_scanning": "Checking the SD card…",
+    "rec_scanned": "SD card checked {when}",
+    "rec_scan_partial": "SD card checked partly {when} — check again for the rest",
+    "rec_scan_never": "SD-card days are unknown until the month is checked",
+    "rec_legend_local": "Green: saved in the media folder",
+    "rec_legend_card": "Blue: on the camera's SD card",
+    "rec_scan_failed": "Could not check the SD card: {msg}"
   },
   "uk": {
     "play": "Дивитися",
@@ -189,13 +198,22 @@ const STRINGS = /* translations */ {
     "rec_redownloading": "Збережений запис неповний — завантажуємо його повторно…",
     "rec_queued": "Чекаємо, поки завершиться поточне завантаження…",
     "rec_failed": "{msg}",
-    "rec_prev": "Попередній день",
-    "rec_next": "Наступний день",
     "rec_refresh": "Оновити",
     "rec_close": "Закрити плеєр",
     "rec_cloud": "На SD-картці камери (не збережено локально)",
     "rec_local": "Збережено в media",
-    "rec_incomplete": "Збережена копія неповна; запис буде завантажено повторно"
+    "rec_incomplete": "Збережена копія неповна; запис буде завантажено повторно",
+    "rec_calendar": "Вибрати день",
+    "rec_prev_month": "Попередній місяць",
+    "rec_next_month": "Наступний місяць",
+    "rec_scan": "Перевірити SD-картку за цей місяць",
+    "rec_scanning": "Перевіряємо SD-картку…",
+    "rec_scanned": "SD-картку перевірено {when}",
+    "rec_scan_partial": "SD-картку перевірено частково {when} — перевір ще раз",
+    "rec_scan_never": "Дні на SD-картці невідомі, поки місяць не перевірено",
+    "rec_legend_local": "Зелений: збережено в media",
+    "rec_legend_card": "Синій: на SD-картці камери",
+    "rec_scan_failed": "Не вдалося перевірити SD-картку: {msg}"
   }
 } /* end translations */;
 
@@ -345,6 +363,66 @@ const style = /* css */ `
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .days { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
+  /* The day picker: a month grid with a dot on every day that has a clip. */
+  .calendar {
+    border-radius: 12px; padding: 8px 10px 10px;
+    border: 1px solid var(--divider-color, rgba(127,127,127,.25));
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .calHead { display: flex; align-items: center; gap: 4px; }
+  .calMonth {
+    flex: 1 1 auto; min-width: 0; text-align: center;
+    font-size: 13px; font-weight: 500; color: var(--primary-text-color);
+  }
+  .calGrid {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
+  }
+  .calDow {
+    text-align: center; font-size: 10px; line-height: 20px;
+    letter-spacing: .04em; text-transform: uppercase;
+    color: var(--secondary-text-color);
+  }
+  .calBlank { height: 30px; }
+  .calDay {
+    position: relative; height: 30px; padding: 0; border: 0; border-radius: 8px;
+    font: inherit; font-size: 12px; cursor: pointer;
+    color: var(--primary-text-color); background: none;
+  }
+  .calDay:hover:not([disabled]) {
+    background: color-mix(in srgb, var(--primary-text-color) 8%, transparent);
+  }
+  .calDay[disabled] { opacity: 0.3; cursor: default; }
+  .calDay.today { font-weight: 700; }
+  .calDay.on {
+    color: var(--text-primary-color, #fff);
+    background: var(--primary-color, #03a9f4);
+  }
+  .calDay .dot {
+    position: absolute; left: 50%; bottom: 3px; width: 4px; height: 4px;
+    margin-left: -2px; border-radius: 50%;
+  }
+  .calDay .dot.local { background: var(--success-color, #43a047); }
+  .calDay .dot.card { background: var(--primary-color, #03a9f4); }
+  .calDay.on .dot.local { background: #a5d6a7; }
+  .calDay.on .dot.card { background: #b3e5fc; }
+  .calFoot {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-size: 11px; line-height: 16px; color: var(--secondary-text-color);
+  }
+  .calText { flex: 1 1 120px; min-width: 0; }
+  .calText.error { color: var(--error-color, #db4437); }
+  .calLegend { display: flex; align-items: center; gap: 4px; }
+  .calLegend .dot {
+    width: 4px; height: 4px; border-radius: 50%; display: inline-block;
+  }
+  .calLegend .dot.local { background: var(--success-color, #43a047); }
+  .calLegend .dot.card { background: var(--primary-color, #03a9f4); }
+  .calScan {
+    font: inherit; font-size: 11px; padding: 4px 8px; border-radius: 999px;
+    border: 1px solid var(--divider-color, rgba(127,127,127,.35));
+    background: none; color: var(--primary-color, #03a9f4); cursor: pointer;
+  }
+  .calScan[disabled] { opacity: 0.5; cursor: default; }
   .iconbtn {
     width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%;
     display: inline-flex; align-items: center; justify-content: center;
@@ -356,6 +434,10 @@ const style = /* css */ `
   }
   .iconbtn[disabled] { opacity: 0.35; cursor: default; }
   .iconbtn.spinning ha-icon { animation: spin 900ms linear infinite; }
+  .iconbtn.on {
+    color: var(--primary-color, #03a9f4);
+    background: color-mix(in srgb, var(--primary-color, #03a9f4) 12%, transparent);
+  }
   .media .recClose {
     position: absolute; top: 8px; right: 8px; z-index: 3;
     width: 30px; height: 30px; color: #fff;
@@ -441,6 +523,12 @@ class EzvizVideoCard extends HTMLElement {
     this._listAt = 0; // when the list was last read (for today's freshness)
     this._listScroll = 0; // where the recordings list was scrolled to
     this._listScrollReset = false; // a day change or refresh starts at the top
+    this._calendarOpen = false; // the day picker under the bar
+    this._calendarMonth = null; // YYYY-MM shown in it; null = the selected day's
+    this._days = {}; // YYYY-MM -> { local: [], card: [], scanned, complete }
+    this._daysGen = 0;
+    this._daysError = "";
+    this._scanningDays = false;
     this._selected = null; // the recording in the media area
     this._clipState = "idle"; // idle | fetching | playing | error
     this._clipIncomplete = false; // the saved copy is short: say it is re-fetched
@@ -493,6 +581,10 @@ class EzvizVideoCard extends HTMLElement {
       this._day = null;
       this._today = null;
       this._listError = "";
+      this._calendarOpen = false;
+      this._calendarMonth = null;
+      this._days = {};
+      this._daysError = "";
     }
     this._stop();
     this._state = "idle";
@@ -1133,6 +1225,10 @@ class EzvizVideoCard extends HTMLElement {
       // Back to the live view: drop the clip and let auto_play take over.
       this._closeClip();
       this._recordings = false;
+      this._calendarOpen = false;
+      this._calendarMonth = null;
+      this._daysGen++; // a scan still in flight no longer owns the panel
+      this._scanningDays = false;
       this._state = "idle";
       this._message = "";
       this._render();
@@ -1226,20 +1322,215 @@ class EzvizVideoCard extends HTMLElement {
     }
   }
 
-  _shiftDay(days) {
-    const base = this._day || this._today || localDay(new Date());
-    const [y, m, d] = base.split("-").map(Number);
-    const next = localDay(new Date(y, m - 1, d + days));
-    if (this._today && next > this._today) return;
+  // -- the day picker ------------------------------------------------------
+
+  _toggleCalendar() {
+    this._calendarOpen = !this._calendarOpen;
+    if (!this._calendarOpen) {
+      this._calendarMonth = null;
+      this._render();
+      return;
+    }
+    if (!this._calendarMonth) {
+      this._calendarMonth = (this._day || this._today || localDay(new Date())).slice(0, 7);
+    }
+    this._render();
+    // The month's dots are cheap: local days are free and the SD days come from
+    // the server's cache. Only the scan button asks the camera.
+    this._loadDays();
+  }
+
+  _shiftCalendarMonth(months) {
+    if (!this._calendarMonth) return;
+    const [y, m] = this._calendarMonth.split("-").map(Number);
+    this._calendarMonth = localDay(new Date(y, m - 1 + months, 1)).slice(0, 7);
+    this._daysError = "";
+    this._render();
+    this._loadDays();
+  }
+
+  _pickDay(day) {
+    if (this._today && day > this._today) return;
+    this._calendarOpen = false;
+    this._calendarMonth = null;
     if (this._selected) this._closeClip();
-    this._day = next;
+    const same = this._day === day && this._list && !this._listError;
+    this._day = day;
+    if (same) {
+      this._render();
+      return;
+    }
     this._list = null;
     this._listScrollReset = true; // another day: start its list at the top
+    this._render();
     this._loadRecordings();
   }
 
-  _atToday() {
-    return !this._today || (this._day || this._today) >= this._today;
+  async _loadDays(scan = false) {
+    if (!this._recordings || !this._hass) return;
+    const serial = this._serial();
+    const month = this._calendarMonth;
+    if (!serial || !month) return;
+    if (scan) {
+      this._scanningDays = true;
+      this._daysError = "";
+      this._render();
+    }
+    const gen = ++this._daysGen;
+    try {
+      const result = await this._hass.callWS({
+        type: "ezviz_rtsp/recording/days",
+        serial,
+        month,
+        scan,
+      });
+      if (gen !== this._daysGen || !this._recordings) return;
+      this._days[month] = result;
+      if (scan) this._daysError = "";
+    } catch (err) {
+      if (gen !== this._daysGen || !this._recordings) return;
+      this._daysError = err?.message || String(err);
+    } finally {
+      if (gen === this._daysGen) {
+        this._scanningDays = false;
+        this._render();
+      }
+    }
+  }
+
+  _atMonth() {
+    return this._calendarMonth >= localDay(new Date()).slice(0, 7);
+  }
+
+  _calendarPanel() {
+    const lang = this._lang;
+    const month = this._calendarMonth || localDay(new Date()).slice(0, 7);
+    const [year, mon] = month.split("-").map(Number);
+    const locale = this._hass?.locale?.language || undefined;
+    const days = this._days[month] || { local: [], card: [], scanned: null, complete: false };
+    const localDays = new Set(days.local || []);
+    const cardDays = new Set(days.card || []);
+    const selected = this._day || this._today || localDay(new Date());
+    const today = this._today || localDay(new Date());
+
+    const panel = document.createElement("div");
+    panel.className = "calendar";
+
+    const head = document.createElement("div");
+    head.className = "calHead";
+    const title = document.createElement("div");
+    title.className = "calMonth";
+    title.textContent = new Date(year, mon - 1, 1).toLocaleDateString(locale, {
+      month: "long",
+      year: "numeric",
+    });
+    head.append(
+      this._recButton(
+        "mdi:chevron-left",
+        t(lang, "rec_prev_month"),
+        () => this._shiftCalendarMonth(-1)
+      ),
+      title,
+      this._recButton(
+        "mdi:chevron-right",
+        t(lang, "rec_next_month"),
+        () => this._shiftCalendarMonth(1),
+        this._scanningDays || this._atMonth()
+      )
+    );
+    panel.append(head);
+
+    const grid = document.createElement("div");
+    grid.className = "calGrid";
+    // Monday first: the week starts on Monday in Ukraine and most of Europe.
+    for (let i = 0; i < 7; i++) {
+      const dow = document.createElement("div");
+      dow.className = "calDow";
+      dow.textContent = new Date(2024, 0, 1 + i).toLocaleDateString(locale, {
+        weekday: "short",
+      });
+      grid.append(dow);
+    }
+    const first = new Date(year, mon - 1, 1);
+    const lead = (first.getDay() + 6) % 7;
+    for (let i = 0; i < lead; i++) {
+      const blank = document.createElement("div");
+      blank.className = "calBlank";
+      grid.append(blank);
+    }
+    const last = new Date(year, mon, 0).getDate();
+    for (let d = 1; d <= last; d++) {
+      const day = `${month}-${String(d).padStart(2, "0")}`;
+      const button = document.createElement("button");
+      button.className =
+        "calDay" + (day === selected ? " on" : "") + (day === today ? " today" : "");
+      button.textContent = String(d);
+      // The month scan holds the camera: picking a day would wait for it.
+      button.disabled = day > today || this._scanningDays;
+      const local = localDays.has(day);
+      const card = cardDays.has(day);
+      if (local || card) {
+        const dot = document.createElement("span");
+        dot.className = "dot " + (local ? "local" : "card");
+        button.append(dot);
+      }
+      button.title = local
+        ? t(lang, "rec_local")
+        : card
+          ? t(lang, "rec_cloud")
+          : String(d);
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this._pickDay(day);
+      });
+      grid.append(button);
+    }
+    panel.append(grid);
+
+    const foot = document.createElement("div");
+    foot.className = "calFoot";
+    const text = document.createElement("div");
+    text.className = "calText" + (this._daysError ? " error" : "");
+    if (this._scanningDays) {
+      text.textContent = t(lang, "rec_scanning");
+    } else if (this._daysError) {
+      text.textContent = t(lang, "rec_scan_failed", { msg: this._daysError });
+    } else if (days.scanned) {
+      const when = new Date(days.scanned).toLocaleString(locale, {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      text.textContent = t(lang, days.complete ? "rec_scanned" : "rec_scan_partial", { when });
+    } else {
+      text.textContent = t(lang, "rec_scan_never");
+    }
+    const scan = document.createElement("button");
+    scan.className = "calScan";
+    scan.textContent = this._scanningDays ? t(lang, "rec_scanning") : t(lang, "rec_scan");
+    scan.disabled =
+      this._scanningDays || this._listing || Boolean(this._clipFetching);
+    scan.title = t(lang, "rec_scan");
+    scan.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this._loadDays(true);
+    });
+    const legend = document.createElement("div");
+    legend.className = "calLegend";
+    for (const [cls, key] of [
+      ["local", "rec_legend_local"],
+      ["card", "rec_legend_card"],
+    ]) {
+      const dot = document.createElement("span");
+      dot.className = "dot " + cls;
+      const label = document.createElement("span");
+      label.textContent = t(lang, key);
+      legend.append(dot, label);
+    }
+    foot.append(text, scan, legend);
+    panel.append(foot);
+    return panel;
   }
 
   _dayLabel() {
@@ -1281,14 +1572,15 @@ class EzvizVideoCard extends HTMLElement {
     day.textContent = this._recordingsLabel();
     const days = document.createElement("div");
     days.className = "days";
+    const pick = this._recButton(
+      "mdi:calendar-month",
+      t(lang, "rec_calendar"),
+      () => this._toggleCalendar()
+    );
+    pick.classList.add("calendarbtn");
+    if (this._calendarOpen) pick.classList.add("on");
     days.append(
-      this._recButton("mdi:chevron-left", t(lang, "rec_prev"), () => this._shiftDay(-1)),
-      this._recButton(
-        "mdi:chevron-right",
-        t(lang, "rec_next"),
-        () => this._shiftDay(1),
-        this._atToday()
-      ),
+      pick,
       this._recButton(
         "mdi:refresh",
         t(lang, "rec_refresh"),
@@ -1299,6 +1591,7 @@ class EzvizVideoCard extends HTMLElement {
     );
     bar.append(day, days);
     view.append(bar);
+    if (this._calendarOpen) view.append(this._calendarPanel());
 
     const list = document.createElement("div");
     list.className = "recList";
