@@ -46,6 +46,13 @@ This project follows [Semantic Versioning](https://semver.org/).
   recording you watch is fetched into a temporary folder, deleted after about two
   hours and kept out of **Media** (no green check, no retention); a clip saved
   earlier still plays from its permanent copy.
+- **A progress bar while a recording is fetched.** The card asks the
+  integration how much of the interval has arrived and shows a bar with
+  "4 / 16 s"; the integration reads the video timestamps inside the camera's
+  MPEG-PS stream as it arrives, so the bar reflects the real transfer (one
+  report serves every card waiting for the same clip). Conversion has no
+  meaningful fraction: the bar fills and the card says "Converting the
+  recording…". The old spinner is gone.
 - **A calendar for picking the day of the recordings.** The card's day arrows
   are gone: a calendar button opens a Monday-first month grid, and tapping a day
   loads its recordings. Future days are disabled and today is emphasised.

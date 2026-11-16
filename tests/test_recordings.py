@@ -64,6 +64,24 @@ def _rec(begin: datetime, seconds: int = 8) -> dict:
     }
 
 
+def _ps_video_pes(pts_seconds: float, payload: bytes = b"\x00" * 8) -> bytes:
+    """One MPEG-PS video PES packet carrying a clear PTS."""
+    pts = int(pts_seconds * 90_000)
+    b0 = 0x20 | (((pts >> 30) & 0x07) << 1) | 1
+    b1 = (pts >> 22) & 0xFF
+    b2 = (((pts >> 15) & 0x7F) << 1) | 1
+    b3 = (pts >> 7) & 0xFF
+    b4 = ((pts & 0x7F) << 1) | 1
+    length = 3 + 5 + len(payload)
+    return (
+        b"\x00\x00\x01\xe0"
+        + length.to_bytes(2, "big")
+        + b"\x80\x80\x05"
+        + bytes((b0, b1, b2, b3, b4))
+        + payload
+    )
+
+
 def test_decode_records_plain_compressed_and_padded() -> None:
     records = [{"B": "2026-11-10T10:00:00", "E": "2026-11-10T10:00:08"}]
     assert decode_records({"records": records, "isFinished": 1}) == (records, False)
@@ -1037,6 +1055,81 @@ def test_a_whole_download_is_not_fetched_twice(monkeypatch) -> None:
     assert opener.call_count == 1
 
 
+class _PacketStream:
+    """A relay stream that continues where the previous call stopped."""
+
+    def __init__(self, bodies: list[bytes]) -> None:
+        self._bodies = bodies
+        self._next = 0
+
+    def iter_packets(self, *, max_packets=None, **kwargs):
+        taken = 0
+        while self._next < len(self._bodies) and (
+            max_packets is None or taken < max_packets
+        ):
+            body = self._bodies[self._next]
+            self._next += 1
+            taken += 1
+            yield SimpleNamespace(body=body, encrypted=False)
+
+
+def test_read_playback_reports_the_delivered_seconds() -> None:
+    bodies = [_ps_video_pes(seconds) for seconds in (0, 4, 8)]
+    seen: list[float | None] = []
+
+    data = rec_module._read_playback(_PacketStream(bodies), time.monotonic() + 5, seen.append)
+
+    assert len(data) == sum(len(body) for body in bodies)
+    assert seen[0] == 0.0
+    assert seen[-1] == 8.0
+
+
+def test_video_pts_survives_a_header_split_across_packets() -> None:
+    packet = _ps_video_pes(10.0)
+    bodies = [packet[:11], packet[11:], _ps_video_pes(20.0)]
+    seen: list[float | None] = []
+
+    rec_module._read_playback(_PacketStream(bodies), time.monotonic() + 5, seen.append)
+
+    assert seen[-1] == 10.0, "10 s and 20 s give a ten-second span"
+
+
+async def test_a_fetch_publishes_progress_and_clears_it(hass, _cloud) -> None:
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    camera = rec_module.find_camera(hass, "BK1")
+    begin = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
+    end = begin + timedelta(seconds=8)
+    key = ("BK1", "20261110T080000Z", "20261110T080008Z", "h264")
+    seen: list[dict] = []
+    converting: list[dict] = []
+
+    def fake_download(client, serial, begin_stamp, end_stamp, timezone, code, report):
+        seen.append(dict(store.progress[key]))
+        report(4.0, 8.0, 1)
+        seen.append(dict(store.progress[key]))
+        return b"PSDATA"
+
+    def fake_mp4(_bin, _ps, _fmt, target):
+        converting.append(dict(store.progress[key]))
+        target.write_bytes(b"mp4")
+
+    with (
+        patch.object(rec_module, "_download_clip", side_effect=fake_download),
+        patch.object(rec_module, "_async_to_mp4", side_effect=fake_mp4),
+        patch("custom_components.ezviz_rtsp.live.ffmpeg_binary", return_value="ffmpeg"),
+    ):
+        path = await rec_module.async_get_clip(hass, camera, begin, end, "h264")
+
+    assert seen[0]["stage"] == "downloading"
+    assert seen[0]["total"] == 8.0
+    assert seen[1]["delivered"] == 4.0
+    assert converting[0]["stage"] == "converting"
+    assert converting[0]["delivered"] == 8.0
+    assert key not in store.progress, "the report goes away when the clip is ready"
+    assert path.exists()
+
+
 def test_day_has_records_asks_for_one_record() -> None:
     day = date(2026, 10, 3)
     index = FakeIndex([datetime(2026, 10, 3, 8, 0)])
@@ -1125,6 +1218,49 @@ async def test_websocket_lists_days_for_the_calendar(
         {"id": 4, "type": "ezviz_rtsp/recording/days", "serial": "BK1", "month": "2999-01"}
     )
     assert (await ws.receive_json())["error"]["code"] == "invalid_format"
+
+
+async def test_websocket_reports_download_progress(hass, hass_ws_client, _cloud) -> None:
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    key = ("BK1", "20261116T080000Z", "20261116T080008Z", "h264")
+    store.progress[key] = {
+        "stage": "downloading",
+        "delivered": 3.5,
+        "total": 8.0,
+        "started": time.monotonic(),
+        "attempt": 1,
+    }
+    ws = await hass_ws_client(hass)
+
+    await ws.send_json(
+        {
+            "id": 1,
+            "type": "ezviz_rtsp/recording/progress",
+            "serial": "BK1",
+            "begin": key[1],
+            "end": key[2],
+        }
+    )
+    msg = await ws.receive_json()
+    assert msg["success"], msg
+    assert msg["result"]["active"] is True
+    assert msg["result"]["stage"] == "downloading"
+    assert msg["result"]["delivered"] == 3.5
+    assert msg["result"]["total"] == 8.0
+    assert msg["result"]["attempt"] == 1
+
+    await ws.send_json(
+        {
+            "id": 2,
+            "type": "ezviz_rtsp/recording/progress",
+            "serial": "BK1",
+            "begin": "20260101T000000Z",
+            "end": "20260101T000008Z",
+        }
+    )
+    msg = await ws.receive_json()
+    assert msg["result"] == {"active": False}
 
 
 async def test_flat_clips_are_migrated_into_day_folders(hass, _cloud) -> None:

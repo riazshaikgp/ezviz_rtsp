@@ -32,7 +32,7 @@ import tempfile
 import time
 import zlib
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta, tzinfo
 from pathlib import Path
@@ -153,6 +153,9 @@ class RecordingStore:
     day_tasks: dict[
         tuple[str, date], asyncio.Task[tuple[list[tuple[datetime, datetime]], bool]]
     ] = field(default_factory=dict)
+    # Downloads in flight, for the card's progress bar: stage, video seconds
+    # delivered and the interval's length. Written by the download thread.
+    progress: dict[tuple[str, str, str, str], dict[str, Any]] = field(default_factory=dict)
 
     def lock(self, serial: str) -> asyncio.Lock:
         """The lock that serialises SD requests to one camera."""
@@ -951,11 +954,71 @@ def _transfer_budget(seconds: float) -> float:
     return min(max(CLIP_DEADLINE, wanted), MAX_TRANSFER_SECONDS)
 
 
-def _read_playback(stream: Any, deadline: float) -> bytearray:
+_PES_TAIL = 17  # a start code split across packets, plus its 14-byte header
+
+
+def _pes_pts(header: bytes) -> int | None:
+    """The 33-bit PTS of a video PES header, or None when it carries none."""
+    if len(header) < 14 or header[:3] != b"\x00\x00\x01" or not 0xE0 <= header[3] <= 0xEF:
+        return None
+    if not header[7] & 0x80:  # PTS_DTS_flags: 10 or 11 (a PTS is present)
+        return None
+    return (
+        ((header[9] & 0x0E) << 29)
+        | (header[10] << 22)
+        | ((header[11] & 0xFE) << 14)
+        | (header[12] << 7)
+        | ((header[13] & 0xFE) >> 1)
+    )
+
+
+class _VideoPts:
+    """Follow the video presentation time of a PS stream as packets arrive.
+
+    The relay sends MPEG-PS in chunks that do not line up with its PES packets,
+    so a small tail is carried over to complete a start code and its header. The
+    timestamps stay clear even when the video bodies are encrypted.
+    """
+
+    def __init__(self) -> None:
+        self.first: int | None = None
+        self.last: int | None = None
+        self._tail = b""
+
+    def feed(self, body: bytes) -> None:
+        data = self._tail + body
+        start = 0
+        while True:
+            index = data.find(b"\x00\x00\x01", start)
+            if index < 0 or index + 14 > len(data):
+                break
+            pts = _pes_pts(data[index : index + 14])
+            if pts is not None:
+                if self.first is None:
+                    self.first = pts
+                if self.last is not None and pts + (1 << 32) < self.last:
+                    pts += 1 << 33  # the 33-bit clock wrapped
+                if self.last is None or pts > self.last:
+                    self.last = pts
+            start = index + 4
+        self._tail = data[-_PES_TAIL:]
+
+    @property
+    def seconds(self) -> float | None:
+        """Video seconds covered so far, or None before two timestamps."""
+        if self.first is None or self.last is None or self.last < self.first:
+            return None
+        return (self.last - self.first) / 90_000
+
+
+def _read_playback(
+    stream: Any, deadline: float, on_progress: Callable[[float | None], None] | None = None
+) -> bytearray:
     """Read one playback stream to its end (or until ``deadline``). Blocking."""
     from pyezvizapi.streaming.cloud.protocol import VtmStreamEOF, VtmStreamTimeout
 
     data = bytearray()
+    pts = _VideoPts()
 
     def take(**limits: Any) -> int:
         taken = 0
@@ -968,6 +1031,9 @@ def _read_playback(stream: Any, deadline: float) -> bytearray:
                 raise RecordingError("The camera sent the clip on an encrypted channel")
             data.extend(packet.body)
             taken += 1
+            if on_progress is not None:
+                pts.feed(packet.body)
+                on_progress(pts.seconds)
             if len(data) > CLIP_MAX_BYTES:
                 raise RecordingError("The recording is too large to play here")
         return taken
@@ -1007,7 +1073,13 @@ def _short_by(span: float, wanted: float) -> float:
 
 
 def _download_clip(
-    client: Any, serial: str, begin: str, end: str, timezone: str, code: str | None
+    client: Any,
+    serial: str,
+    begin: str,
+    end: str,
+    timezone: str,
+    code: str | None,
+    progress: Callable[[float | None, float, int], None] | None = None,
 ) -> bytes:
     """One SD interval as MPEG-PS through the cloud relay. Blocking.
 
@@ -1029,12 +1101,20 @@ def _download_clip(
             started = time.monotonic()
             deadline = started + budget
             stream = _open_playback(client, serial, begin, end, timezone, deadline)
+
+            def report(
+                delivered: float | None, attempt: int = attempt, wanted: float = wanted
+            ) -> None:
+                if progress is not None:
+                    progress(delivered, wanted, attempt)
+
             try:
-                data = _read_playback(stream, deadline)
+                data = _read_playback(stream, deadline, report)
             finally:
                 with contextlib.suppress(OSError):
                     stream.close()
             span = _delivered_seconds(bytes(data))
+            report(span)
             missing = 0.0 if span is None else _short_by(span, wanted)
             _LOGGER.debug(
                 "Recording %s %s-%s: %.1f of %.1f s from the camera in %.1f s (attempt %d)",
@@ -1331,59 +1411,89 @@ async def _async_fetch(
         )
         target = target_dir / _clip_name(key)
     started = time.monotonic()
-    async with store.lock(serial):
-        # A queued request can wait here for another clip, and a live view may
-        # have started meanwhile; the camera cannot stream and read its SD card
-        # at the same time.
-        live = find_stream(hass, serial)
-        if live is not None and live.active:
-            raise RecordingError("The camera is streaming live; stop the live view first")
-        ps = await hass.async_add_executor_job(
-            _download_clip,
-            camera.coordinator.ezviz_client,
-            serial,
-            begin,
-            end,
-            hass.config.time_zone,
-            camera.code,
-        )
-    fetched = time.monotonic()
-    await hass.async_add_executor_job(_ensure_parent, target)
-    # Write beside the target and move it into place when ffmpeg is done, so a
-    # reader never sees a half-written MP4.
-    part = target.with_name(target.name + ".part")
+    wanted = (parse_stamp(end) - parse_stamp(begin)).total_seconds()
+    # The card polls this while the clip is on its way: the camera sends the
+    # recording as a PS stream, and the video timestamps it carries say how much
+    # of the interval has arrived.
+    state: dict[str, Any] = {
+        "stage": "queued",
+        "delivered": 0.0,
+        "total": wanted,
+        "started": started,
+        "attempt": 1,
+    }
+    store.progress[key] = state
+
+    def report(delivered: float | None, total: float, attempt: int) -> None:
+        current = store.progress.get(key)
+        if current is None:
+            return
+        if delivered is not None:
+            current["delivered"] = min(delivered, total)
+        current["total"] = total
+        current["attempt"] = attempt
+
     try:
-        await _async_to_mp4(ffmpeg_binary(hass), ps, fmt, part)
-        await hass.async_add_executor_job(_replace_clip, part, target)
-    except BaseException:
-        await hass.async_add_executor_job(_remove_quietly, part)
-        raise
-    _LOGGER.debug(
-        "Recording %s %s-%s: %d bytes from the camera in %.1f s, %s MP4 in %.1f s",
-        serial, begin, end, len(ps), fetched - started, fmt, time.monotonic() - fetched,
-    )
-    if keep:
-        store.clips[key] = target
-        store.clips.move_to_end(key)
-        # The camera sometimes sends a little less than the index promised. One
-        # real attempt was enough: keep what came back instead of fetching it on
-        # every play.
-        if await hass.async_add_executor_job(_clip_is_short, target, key):
-            store.short.add(key)
-            _LOGGER.debug(
-                "Recording %s %s-%s is still shorter than its interval; keeping it",
+        async with store.lock(serial):
+            # A queued request can wait here for another clip, and a live view may
+            # have started meanwhile; the camera cannot stream and read its SD card
+            # at the same time.
+            live = find_stream(hass, serial)
+            if live is not None and live.active:
+                raise RecordingError("The camera is streaming live; stop the live view first")
+            state["stage"] = "downloading"
+            ps = await hass.async_add_executor_job(
+                _download_clip,
+                camera.coordinator.ezviz_client,
                 serial,
                 begin,
                 end,
+                hass.config.time_zone,
+                camera.code,
+                report,
             )
+        fetched = time.monotonic()
+        state["stage"] = "converting"
+        state["delivered"] = wanted
+        await hass.async_add_executor_job(_ensure_parent, target)
+        # Write beside the target and move it into place when ffmpeg is done, so a
+        # reader never sees a half-written MP4.
+        part = target.with_name(target.name + ".part")
+        try:
+            await _async_to_mp4(ffmpeg_binary(hass), ps, fmt, part)
+            state["stage"] = "saving"
+            await hass.async_add_executor_job(_replace_clip, part, target)
+        except BaseException:
+            await hass.async_add_executor_job(_remove_quietly, part)
+            raise
+        _LOGGER.debug(
+            "Recording %s %s-%s: %d bytes from the camera in %.1f s, %s MP4 in %.1f s",
+            serial, begin, end, len(ps), fetched - started, fmt, time.monotonic() - fetched,
+        )
+        if keep:
+            store.clips[key] = target
+            store.clips.move_to_end(key)
+            # The camera sometimes sends a little less than the index promised. One
+            # real attempt was enough: keep what came back instead of fetching it on
+            # every play.
+            if await hass.async_add_executor_job(_clip_is_short, target, key):
+                store.short.add(key)
+                _LOGGER.debug(
+                    "Recording %s %s-%s is still shorter than its interval; keeping it",
+                    serial,
+                    begin,
+                    end,
+                )
+            else:
+                store.short.discard(key)
+            # Clips are kept until the retention setting ages them out; a download is
+            # a good moment to sweep, since the folder is on disk anyway.
+            await async_prune_recordings(hass)
         else:
-            store.short.discard(key)
-        # Clips are kept until the retention setting ages them out; a download is
-        # a good moment to sweep, since the folder is on disk anyway.
-        await async_prune_recordings(hass)
-    else:
-        store.temp[key] = target
-    return target
+            store.temp[key] = target
+        return target
+    finally:
+        store.progress.pop(key, None)
 
 
 def clip_path(serial: str, begin: str, end: str, fmt: str) -> str:

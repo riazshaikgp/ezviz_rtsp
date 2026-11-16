@@ -415,9 +415,12 @@ day of a camera's recordings and plays the one you tap, right in the card.
   recordings on this day"**.
 - **Tap a recording to play it** in the card's player, with the usual video
   controls (pause, seek, full screen). Tap another to switch, or close the
-  player with ✕. The card shows "Fetching the recording from the camera…"
-  while the clip is on its way, and the list stays at the row you tapped
-  instead of jumping back to the top.
+  player with ✕. While the clip is on its way the card shows a **progress bar**
+  with the seconds received out of the recording's length, followed by
+  "Converting the recording…"; the list stays at the row you tapped instead of
+  jumping back to the top. The bar follows the video timestamps the camera
+  sends, so it is real progress rather than a guess, and it reuses one report
+  when several cards wait for the same clip.
 - **Tapping several recordings in a row** while one is still being fetched only
   remembers the newest: the ones in between are not downloaded, so the camera is
   not woken for clips you skipped. The waiting view says "Waiting for the

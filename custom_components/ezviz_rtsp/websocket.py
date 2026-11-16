@@ -6,6 +6,7 @@ needs a way to map a camera serial to the camera entity of the loaded account.
 
 from __future__ import annotations
 
+import time
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -26,6 +27,7 @@ from .recordings import (
     RecordingError,
     async_clip_states,
     async_get_clip,
+    async_get_store,
     async_get_temp_clip,
     async_list_day,
     async_month_days,
@@ -46,6 +48,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
     async_register_command(hass, ws_live_stop)
     async_register_command(hass, ws_recordings)
     async_register_command(hass, ws_recording_days)
+    async_register_command(hass, ws_recording_progress)
     async_register_command(hass, ws_recording_clip)
 
 
@@ -219,6 +222,39 @@ async def ws_recording_days(
     connection.send_result(
         msg["id"],
         {"serial": camera.serial, "month": msg["month"], **result},
+    )
+
+
+@websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/recording/progress",
+        vol.Required("serial"): str,
+        vol.Required("begin"): str,
+        vol.Required("end"): str,
+        vol.Optional("format", default="h264"): vol.In(FORMATS),
+    }
+)
+@async_response
+async def ws_recording_progress(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """How far a clip that is being fetched from the camera has got."""
+    store = await async_get_store(hass)
+    state = store.progress.get((msg["serial"], msg["begin"], msg["end"], msg["format"]))
+    if state is None:
+        connection.send_result(msg["id"], {"active": False})
+        return
+    started = float(state.get("started") or time.monotonic())
+    connection.send_result(
+        msg["id"],
+        {
+            "active": True,
+            "stage": state.get("stage", "downloading"),
+            "delivered": round(float(state.get("delivered") or 0.0), 1),
+            "total": round(float(state.get("total") or 0.0), 1),
+            "attempt": int(state.get("attempt") or 1),
+            "elapsed": round(time.monotonic() - started, 1),
+        },
     )
 
 

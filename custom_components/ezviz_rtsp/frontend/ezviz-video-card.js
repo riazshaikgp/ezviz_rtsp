@@ -131,6 +131,9 @@ const STRINGS = /* translations */ {
     "rec_fetching": "Fetching the recording from the camera…",
     "rec_redownloading": "The saved recording is incomplete — downloading it again…",
     "rec_queued": "Waiting for the current recording to finish…",
+    "rec_waiting_camera": "Waiting for the camera to send it…",
+    "rec_converting": "Converting the recording…",
+    "rec_progress": "{have} / {total} s",
     "rec_failed": "{msg}",
     "rec_refresh": "Refresh",
     "rec_close": "Close player",
@@ -197,6 +200,9 @@ const STRINGS = /* translations */ {
     "rec_fetching": "Завантажуємо запис із камери…",
     "rec_redownloading": "Збережений запис неповний — завантажуємо його повторно…",
     "rec_queued": "Чекаємо, поки завершиться поточне завантаження…",
+    "rec_waiting_camera": "Чекаємо, поки камера надішле запис…",
+    "rec_converting": "Перетворюємо запис…",
+    "rec_progress": "{have} / {total} с",
     "rec_failed": "{msg}",
     "rec_refresh": "Оновити",
     "rec_close": "Закрити плеєр",
@@ -480,6 +486,31 @@ const style = /* css */ `
     animation: spin 900ms linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Download progress, in the middle of the picture while a clip is fetched. */
+  .message .progress {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    width: min(280px, 82%);
+  }
+  .message .progress .bar {
+    position: relative; width: 100%; height: 6px; border-radius: 999px;
+    overflow: hidden; background: color-mix(in srgb, #fff 28%, transparent);
+  }
+  .message .progress .barFill {
+    height: 100%; width: 0; border-radius: 999px; background: #fff;
+    transition: width 300ms linear;
+  }
+  .message .progress .bar.indeterminate .barFill {
+    width: 35%; animation: slide 1.2s ease-in-out infinite;
+  }
+  @keyframes slide {
+    0% { margin-left: -35%; }
+    100% { margin-left: 100%; }
+  }
+  .message .progress .hint {
+    font-size: 11px; line-height: 14px; opacity: .8;
+    font-variant-numeric: tabular-nums; min-height: 14px;
+  }
 `;
 
 class EzvizVideoCard extends HTMLElement {
@@ -536,6 +567,9 @@ class EzvizVideoCard extends HTMLElement {
     this._clipFetching = null; // the camera download in flight, if any
     this._queuedClip = null; // the newest tap waiting for that download
     this._clipQueued = false; // the view is waiting, not fetching yet
+    this._progress = null; // the latest report on the clip being fetched
+    this._progressTimer = null;
+    this._progressDom = null; // the bar in the media area, updated in place
     this._clipError = "";
     this._clipFormat = "";
     this._clipGen = 0;
@@ -629,6 +663,7 @@ class EzvizVideoCard extends HTMLElement {
       this._unwatchVisibility();
       this._visible = false;
       this._clipVideo?.pause();
+      this._stopProgress();
       this._stop(true);
     });
   }
@@ -1750,6 +1785,8 @@ class EzvizVideoCard extends HTMLElement {
       this._clipQueued = true;
       this._clipIncomplete = Boolean(rec.incomplete);
       this._queuedClip = { rec, fallback };
+      // The tap is for another clip now: stop watching the one in flight.
+      this._stopProgress();
       this._render();
       return;
     }
@@ -1769,13 +1806,15 @@ class EzvizVideoCard extends HTMLElement {
     this._clipIncomplete = Boolean(rec.incomplete);
     const ticket = cloud ? {} : null;
     if (ticket) this._clipFetching = ticket;
+    const format = this._recFormat(fallback);
+    this._stopProgress();
     this._render();
+    if (ticket) this._startProgress(serial, rec, format, gen);
     try {
       // Another view (or another browser) may have started the live stream
       // since the list was read; release it again so the camera is free.
       await this._stopLive();
       if (gen !== this._clipGen || !this._recordings) return;
-      const format = this._recFormat(fallback);
       const result = await this._hass.callWS({
         type: "ezviz_rtsp/recording/clip",
         serial,
@@ -1785,6 +1824,7 @@ class EzvizVideoCard extends HTMLElement {
         keep: this._config.save_recordings !== false,
       });
       if (gen !== this._clipGen || !this._recordings) return;
+      this._stopProgress();
       // Only a clip the server kept (or already had) is local. A saved copy
       // that was short has just been replaced, so the warning goes too.
       rec.local = Boolean(result.saved);
@@ -1818,6 +1858,7 @@ class EzvizVideoCard extends HTMLElement {
       video.play().catch(() => {});
     } catch (err) {
       if (gen !== this._clipGen) return;
+      this._stopProgress();
       this._clipState = "error";
       this._clipError = err?.message || String(err);
       this._render();
@@ -1836,8 +1877,86 @@ class EzvizVideoCard extends HTMLElement {
     this._startClip(queued.rec, queued.fallback, true);
   }
 
+  // The clip comes off the camera's SD card through the relay, so the only
+  // honest progress is how much of the interval's video time has arrived. The
+  // integration reads it from the PS timestamps and the card asks twice a
+  // second; conversion has no meaningful fraction and shows a full bar.
+  _startProgress(serial, rec, format, gen) {
+    this._stopProgress();
+    const ask = async () => {
+      if (!this._hass || this._clipState !== "fetching" || gen !== this._clipGen) return;
+      try {
+        const result = await this._hass.callWS({
+          type: "ezviz_rtsp/recording/progress",
+          serial,
+          begin: rec.begin,
+          end: rec.end,
+          format,
+        });
+        if (gen !== this._clipGen || this._clipState !== "fetching") return;
+        if (result?.active) {
+          this._progress = result;
+          this._paintProgress();
+        }
+      } catch {
+        /* a progress report is optional; the clip request reports real errors */
+      }
+    };
+    this._progressTimer = setInterval(ask, 600);
+  }
+
+  _stopProgress() {
+    if (this._progressTimer) {
+      clearInterval(this._progressTimer);
+      this._progressTimer = null;
+    }
+    this._progress = null;
+  }
+
+  _paintProgress() {
+    const dom = this._progressDom;
+    if (!dom) return;
+    const lang = this._lang;
+    const info = this._progress;
+    const stage = this._clipQueued ? "queued" : info?.stage || "downloading";
+    const total = Number(info?.total) || Number(this._selected?.seconds) || 0;
+    const delivered = Math.max(
+      0,
+      Math.min(Number(info?.delivered) || 0, total || Number.MAX_SAFE_INTEGER)
+    );
+    let percent = null;
+    if (stage === "converting" || stage === "saving") {
+      percent = 100;
+    } else if (delivered > 0 && total > 0) {
+      percent = Math.min(99, Math.max(1, Math.round((delivered / total) * 100)));
+    }
+    dom.text.textContent =
+      stage === "queued"
+        ? t(lang, "rec_queued")
+        : stage === "converting" || stage === "saving"
+          ? t(lang, "rec_converting")
+          : t(lang, this._clipIncomplete ? "rec_redownloading" : "rec_fetching");
+    if (percent === null) {
+      dom.bar.classList.add("indeterminate");
+      dom.fill.style.width = "";
+      dom.hint.textContent =
+        stage === "downloading" ? t(lang, "rec_waiting_camera") : "";
+    } else {
+      dom.bar.classList.remove("indeterminate");
+      dom.fill.style.width = `${percent}%`;
+      dom.hint.textContent =
+        percent >= 100
+          ? ""
+          : t(lang, "rec_progress", {
+              have: Math.floor(delivered),
+              total: Math.round(total),
+            });
+    }
+  }
+
   _closeClip() {
     this._clipGen++;
+    this._stopProgress();
     const video = this._clipVideo;
     if (video) {
       video.pause();
@@ -1869,6 +1988,7 @@ class EzvizVideoCard extends HTMLElement {
   }
 
   _renderRecordingMedia(media) {
+    this._progressDom = null;
     if (this._clipState === "playing") {
       media.appendChild(this._ensureClipVideo());
       media.appendChild(this._closeClipButton());
@@ -1877,18 +1997,22 @@ class EzvizVideoCard extends HTMLElement {
     if (this._clipState === "fetching") {
       const message = document.createElement("div");
       message.className = "message";
-      message.textContent = t(
-        this._lang,
-        this._clipQueued
-          ? "rec_queued"
-          : this._clipIncomplete
-            ? "rec_redownloading"
-            : "rec_fetching"
-      );
+      const progress = document.createElement("div");
+      progress.className = "progress";
+      const text = document.createElement("div");
+      text.className = "text";
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      const fill = document.createElement("div");
+      fill.className = "barFill";
+      bar.append(fill);
+      const hint = document.createElement("div");
+      hint.className = "hint";
+      progress.append(text, bar, hint);
+      message.append(progress);
       media.appendChild(message);
-      const spinner = document.createElement("div");
-      spinner.className = "spinner";
-      media.appendChild(spinner);
+      this._progressDom = { text, bar, fill, hint };
+      this._paintProgress();
       return;
     }
     if (this._clipState === "error") {
