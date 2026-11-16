@@ -67,6 +67,13 @@ This project follows [Semantic Versioning](https://semver.org/).
   the month was last checked and whether the check was complete.
 
 ### Fixed
+- **Playing a recording (and the live picture) fills the card's width.** The
+  picture box was fixed at 16:9 with `object-fit: contain`, so a 4:3 camera —
+  every EZVIZ doorbell records 4:3 — sat between two black bands. The box now
+  takes the source's own aspect ratio as soon as the player knows it, so the
+  picture reaches both edges with nothing cropped. A portrait stream (a
+  peephole, a rotated phone) is capped at a square and cropped rather than
+  making the card very tall.
 - **The page no longer jumps to the top when a download finishes and starts
   playing.** The player used to replace the whole card, which threw away the
   list, the row that had just been clicked, and its focus — WebKit (Safari and

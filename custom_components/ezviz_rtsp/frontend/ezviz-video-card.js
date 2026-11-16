@@ -1920,6 +1920,7 @@ class EzvizVideoCard extends HTMLElement {
         // The camera's index can be a second or two off the file it sends;
         // once the player knows the real length, show that in the row.
         if (this._selected !== rec) return;
+        this._fitMediaTo(video);
         const seconds = Math.round(video.duration);
         if (!Number.isFinite(seconds) || seconds <= 0) return;
         const listed = rec.seconds;
@@ -2096,6 +2097,26 @@ class EzvizVideoCard extends HTMLElement {
         /* an embedded browser without scrollTo */
       }
     };
+  }
+
+  // The card's picture box is 16:9, but a camera often records in 4:3 (many
+  // doorbells do), so object-fit: contain left black bands at the sides. Take
+  // the source's own shape instead, and the picture fills the card's width.
+  _fitMediaTo(element) {
+    const media = this._media;
+    if (!media || !media.contains(element)) return;
+    const width = Number(element.videoWidth || element.naturalWidth);
+    const height = Number(element.videoHeight || element.naturalHeight);
+    if (!width || !height) return;
+    if (width >= height) {
+      media.style.aspectRatio = `${width} / ${height}`;
+      element.style.objectFit = "contain";
+    } else {
+      // A portrait stream must not make the card taller than a square: crop
+      // instead of showing bands above and below.
+      media.style.aspectRatio = "1 / 1";
+      element.style.objectFit = "cover";
+    }
   }
 
   // The clip is ready: put the player where the progress bar was. A full render
@@ -2307,7 +2328,10 @@ class EzvizVideoCard extends HTMLElement {
     img.alt = "";
     // 'load' fires when the first frame of the multipart stream is in; the open
     // connection then keeps replacing the picture as the camera sends more.
-    img.addEventListener("load", () => this._onStarted(gen, lang));
+    img.addEventListener("load", () => {
+      this._fitMediaTo(img);
+      this._onStarted(gen, lang);
+    });
     img.addEventListener("error", () => {
       if (gen === this._gen) this._fail(t(lang, "could_not_start", { msg: "MJPEG" }));
     });
@@ -2406,6 +2430,9 @@ class EzvizVideoCard extends HTMLElement {
     const onStarted = () => this._onStarted(gen, lang);
     video.addEventListener("playing", onStarted);
     video.addEventListener("loadeddata", onStarted);
+    video.addEventListener("loadedmetadata", () => {
+      if (this._video === video) this._fitMediaTo(video);
+    });
     video.play().catch(() => {});
     this._startupTimer = setTimeout(() => {
       if (gen !== this._gen || this._started) return;
