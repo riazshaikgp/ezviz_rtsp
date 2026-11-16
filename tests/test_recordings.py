@@ -40,6 +40,21 @@ def _packed(records: list[dict], pad: int = 0) -> str:
     return base64.b64encode(zlib.compress(json.dumps(records).encode()) + b"\0" * pad).decode()
 
 
+def _mp4_bytes(seconds: float, timescale: int = 1000) -> bytes:
+    """A minimal MP4 with just the boxes needed to read its duration."""
+    body = (
+        b"\x00\x00\x00\x00"  # version 0, flags
+        + b"\x00" * 8  # creation and modification
+        + timescale.to_bytes(4, "big")
+        + int(seconds * timescale).to_bytes(4, "big")
+        + b"\x00" * 8
+    )
+    mvhd = (8 + len(body)).to_bytes(4, "big") + b"mvhd" + body
+    moov = (8 + len(mvhd)).to_bytes(4, "big") + b"moov" + mvhd
+    ftyp = (16).to_bytes(4, "big") + b"ftyp" + b"isom" + b"\x00" * 4
+    return ftyp + moov
+
+
 def _rec(begin: datetime, seconds: int = 8) -> dict:
     return {
         "B": begin.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -704,6 +719,98 @@ def test_a_fraction_short_is_not_a_shortfall() -> None:
     # A real gap is.
     assert rec_module._short_by(9.0, 12) > 0
     assert rec_module._short_by(100, 120) > 0
+
+
+def test_mp4_duration_is_read_from_the_movie_header(tmp_path) -> None:
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(_mp4_bytes(12.5))
+    assert rec_module._mp4_seconds(clip) == 12.5
+
+    (tmp_path / "bad.mp4").write_bytes(b"not an mp4 at all")
+    assert rec_module._mp4_seconds(tmp_path / "bad.mp4") is None
+
+
+async def test_a_cached_clip_shorter_than_its_interval_is_fetched_again(
+    hass, _cloud
+) -> None:
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    camera = rec_module.find_camera(hass, "BK1")
+    begin = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
+    end = begin + timedelta(seconds=8)
+    key = ("BK1", "20261110T080000Z", "20261110T080008Z", "h264")
+    saved = rec_module._clip_path(store, key)
+    saved.parent.mkdir(parents=True)
+    # What the fixed 90 s window used to leave behind: a file much shorter than
+    # the interval in its name.
+    saved.write_bytes(_mp4_bytes(2))
+    store.clips.clear()
+
+    async def full_mp4(_bin, _ps, _fmt, target):
+        target.write_bytes(_mp4_bytes(8))
+
+    with (
+        patch.object(rec_module, "_download_clip", return_value=b"PSDATA") as download,
+        patch.object(rec_module, "_async_to_mp4", side_effect=full_mp4),
+        patch("custom_components.ezviz_rtsp.live.ffmpeg_binary", return_value="ffmpeg"),
+    ):
+        path = await rec_module.async_get_clip(hass, camera, begin, end, "h264")
+
+    download.assert_called_once()
+    assert path == saved
+    assert rec_module._mp4_seconds(path) == 8.0
+    assert key not in store.short
+
+
+async def test_a_recording_the_camera_sends_short_is_kept_and_served(
+    hass, _cloud
+) -> None:
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    camera = rec_module.find_camera(hass, "BK1")
+    begin = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
+    end = begin + timedelta(seconds=8)
+    key = ("BK1", "20261110T080000Z", "20261110T080008Z", "h264")
+    saved = rec_module._clip_path(store, key)
+
+    async def short_mp4(_bin, _ps, _fmt, target):
+        target.write_bytes(_mp4_bytes(6))  # the camera itself sends 6 of 8 s
+
+    with (
+        patch.object(rec_module, "_download_clip", return_value=b"PSDATA"),
+        patch.object(rec_module, "_async_to_mp4", side_effect=short_mp4),
+        patch("custom_components.ezviz_rtsp.live.ffmpeg_binary", return_value="ffmpeg"),
+    ):
+        path = await rec_module.async_get_clip(hass, camera, begin, end, "h264")
+
+    # Kept, and marked: a second play must not wake the camera again.
+    assert path == saved and path.exists()
+    assert key in store.short
+    with patch.object(rec_module, "_download_clip", new=AsyncMock()) as download:
+        again = await rec_module.async_get_clip(hass, camera, begin, end, "h264")
+    download.assert_not_called()
+    assert again == path
+
+
+async def test_a_cached_clip_of_the_right_length_is_not_fetched_again(
+    hass, _cloud
+) -> None:
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    camera = rec_module.find_camera(hass, "BK1")
+    begin = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
+    end = begin + timedelta(seconds=8)
+    key = ("BK1", "20261110T080000Z", "20261110T080008Z", "h264")
+    saved = rec_module._clip_path(store, key)
+    saved.parent.mkdir(parents=True)
+    saved.write_bytes(_mp4_bytes(8))
+    store.clips.clear()
+
+    with patch.object(rec_module, "_download_clip", new=AsyncMock()) as download:
+        path = await rec_module.async_get_clip(hass, camera, begin, end, "h264")
+
+    assert path == saved
+    download.assert_not_called()
 
 
 def test_a_short_download_is_fetched_once_more(monkeypatch) -> None:

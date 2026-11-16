@@ -88,6 +88,8 @@ CLIP_TRANSFER_ATTEMPTS = 2
 # The socket's own timeout must outlast a camera waking up.
 CLIP_SOCKET_TIMEOUT = 30.0
 CLIP_MAX_BYTES = 96 * 1024 * 1024
+# An MP4's metadata (moov) is small; cap what is read to find its duration.
+_MOOV_MAX_BYTES = 8 * 1024 * 1024
 # EZVIZ answers a playback request with 5405 while another viewer holds the
 # camera: the app, a live view, or a session the relay is still releasing. The
 # relay usually lets go a moment later, so a couple of attempts save the user a
@@ -135,6 +137,9 @@ class RecordingStore:
         default_factory=dict
     )
     pending: dict[tuple[str, str, str, str], asyncio.Future[Path]] = field(default_factory=dict)
+    # Clips the camera itself sends shorter than the index, even after a retry:
+    # play them as they are instead of fetching them again on every play.
+    short: set[tuple[str, str, str, str]] = field(default_factory=set)
     # One SD request per camera at a time: EZVIZ refuses parallel sessions.
     locks: dict[str, asyncio.Lock] = field(default_factory=dict)
 
@@ -273,6 +278,101 @@ def _saved_temp(root: Path, key: tuple[str, str, str, str]) -> Path | None:
         if fallback.is_file():
             return fallback
     return None
+
+
+def _mp4_seconds(path: Path) -> float | None:
+    """The movie duration recorded in an MP4's ``mvhd`` box, in seconds.
+
+    A clip saved by a version whose fixed transfer window cut long recordings
+    would otherwise be served from media as if it were whole. The movie header
+    sits near the start of files written with ``+faststart``; the rest of the
+    file is skipped by box size and never read.
+    """
+    try:
+        with path.open("rb") as file:
+            end = path.stat().st_size
+            pos = 0
+            while pos + 8 <= end:
+                file.seek(pos)
+                head = file.read(16)
+                if len(head) < 8:
+                    return None
+                size = int.from_bytes(head[0:4], "big")
+                kind = head[4:8]
+                header = 8
+                if size == 1:
+                    if len(head) < 16:
+                        return None
+                    size = int.from_bytes(head[8:16], "big")
+                    header = 16
+                elif size == 0:
+                    size = end - pos
+                if size < header or pos + size > end:
+                    return None
+                if kind == b"moov":
+                    file.seek(pos + header)
+                    return _mvhd_seconds(file.read(min(size - header, _MOOV_MAX_BYTES)))
+                pos += size
+    except OSError:
+        return None
+    return None
+
+
+def _mvhd_seconds(payload: bytes) -> float | None:
+    """The duration in an MP4 ``moov`` payload, from its ``mvhd`` child."""
+    pos = 0
+    while pos + 8 <= len(payload):
+        size = int.from_bytes(payload[pos : pos + 4], "big")
+        kind = payload[pos + 4 : pos + 8]
+        header = 8
+        if size == 1:
+            if pos + 16 > len(payload):
+                return None
+            size = int.from_bytes(payload[pos + 8 : pos + 16], "big")
+            header = 16
+        elif size == 0:
+            size = len(payload) - pos
+        if size < header or pos + size > len(payload):
+            return None
+        if kind == b"mvhd":
+            body = payload[pos + header : pos + size]
+            if len(body) < 20:
+                return None
+            if body[0] == 1:
+                if len(body) < 32:
+                    return None
+                timescale = int.from_bytes(body[20:24], "big")
+                duration = int.from_bytes(body[24:32], "big")
+            else:
+                timescale = int.from_bytes(body[12:16], "big")
+                duration = int.from_bytes(body[16:20], "big")
+            return duration / timescale if timescale else None
+        pos += size
+    return None
+
+
+def _clip_is_short(path: Path, key: tuple[str, str, str, str]) -> bool:
+    """Whether a saved MP4 is clearly shorter than the interval it stands for."""
+    seconds = _mp4_seconds(path)
+    if seconds is None:
+        return False
+    wanted = (parse_stamp(key[2]) - parse_stamp(key[1])).total_seconds()
+    return _short_by(seconds, wanted) > 0
+
+
+def _remove_quietly(path: Path) -> None:
+    """Delete a file, tolerating one that is already gone."""
+    with contextlib.suppress(OSError):
+        path.unlink()
+
+
+def _replace_clip(part: Path, target: Path) -> None:
+    """Put a finished MP4 in place, so no reader ever sees a partial file."""
+    try:
+        part.replace(target)
+    except OSError:
+        _remove_quietly(part)
+        raise
 
 
 async def async_get_store(hass: HomeAssistant) -> RecordingStore:
@@ -803,15 +903,30 @@ async def _lookup_clip(
 ) -> Path | None:
     """The clip from the in-memory index or the media folder, if it is there."""
     if (path := store.clips.get(key)) is not None:
-        if await hass.async_add_executor_job(path.is_file):
+        if not await hass.async_add_executor_job(path.is_file):
+            # Removed outside the integration (by hand, or by another tool).
+            store.clips.pop(key, None)
+        elif key in store.short or not await hass.async_add_executor_job(
+            _clip_is_short, path, key
+        ):
             store.clips.move_to_end(key)
             return path
-        # Removed outside the integration (by hand, or by another tool).
-        store.clips.pop(key, None)
+        else:
+            # Saved by a version whose fixed transfer window cut long clips:
+            # this file is shorter than the interval, so fetch it again.
+            _LOGGER.debug("Clip %s is shorter than its interval; fetching again", path.name)
+            await hass.async_add_executor_job(_remove_quietly, path)
+            store.clips.pop(key, None)
     # The media folder is the source of truth: a clip saved earlier is served
     # again without touching the camera, even when the in-memory index missed it
     # (a restored backup, a copied file, or an index built before it was written).
     if (path := await hass.async_add_executor_job(_saved_clip, store, key)) is not None:
+        if key not in store.short and await hass.async_add_executor_job(
+            _clip_is_short, path, key
+        ):
+            _LOGGER.debug("Clip %s is shorter than its interval; fetching again", path.name)
+            await hass.async_add_executor_job(_remove_quietly, path)
+            return None
         store.clips[key] = path
         store.clips.move_to_end(key)
         return path
@@ -825,8 +940,14 @@ async def async_get_clip(
     _validate_clip(begin, end, fmt)
     store = await async_get_store(hass)
     key = (camera.serial, utc_stamp(begin), utc_stamp(end), fmt)
+    # A fetch already in flight must win: its target file is not there yet (and
+    # a partial one must never be taken for a saved clip).
+    if (pending := store.pending.get(key)) is not None:
+        return await asyncio.shield(pending)
     if (path := await _lookup_clip(hass, store, key)) is not None:
         return path
+    # The check again: another caller may have started the fetch while the
+    # (possibly slow) duration check above was running.
     if (pending := store.pending.get(key)) is not None:
         return await asyncio.shield(pending)
     future: asyncio.Future[Path] = asyncio.get_running_loop().create_future()
@@ -955,7 +1076,15 @@ async def _async_fetch(
         )
     fetched = time.monotonic()
     await hass.async_add_executor_job(_ensure_parent, target)
-    await _async_to_mp4(ffmpeg_binary(hass), ps, fmt, target)
+    # Write beside the target and move it into place when ffmpeg is done, so a
+    # reader never sees a half-written MP4.
+    part = target.with_name(target.name + ".part")
+    try:
+        await _async_to_mp4(ffmpeg_binary(hass), ps, fmt, part)
+        await hass.async_add_executor_job(_replace_clip, part, target)
+    except BaseException:
+        await hass.async_add_executor_job(_remove_quietly, part)
+        raise
     _LOGGER.debug(
         "Recording %s %s-%s: %d bytes from the camera in %.1f s, %s MP4 in %.1f s",
         serial, begin, end, len(ps), fetched - started, fmt, time.monotonic() - fetched,
@@ -963,6 +1092,19 @@ async def _async_fetch(
     if keep:
         store.clips[key] = target
         store.clips.move_to_end(key)
+        # The camera sometimes sends a little less than the index promised. One
+        # real attempt was enough: keep what came back instead of fetching it on
+        # every play.
+        if await hass.async_add_executor_job(_clip_is_short, target, key):
+            store.short.add(key)
+            _LOGGER.debug(
+                "Recording %s %s-%s is still shorter than its interval; keeping it",
+                serial,
+                begin,
+                end,
+            )
+        else:
+            store.short.discard(key)
         # Clips are kept until the retention setting ages them out; a download is
         # a good moment to sweep, since the folder is on disk anyway.
         await async_prune_recordings(hass)

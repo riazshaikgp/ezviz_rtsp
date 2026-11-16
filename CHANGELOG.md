@@ -58,9 +58,12 @@ This project follows [Semantic Versioning](https://semver.org/).
   clip lookup now checks the folder itself, not only the in-memory index, so a
   file saved earlier is played straight from `media/ezviz_rtsp/` even after a
   restart, a restored backup or a copy made by hand; a stale index entry whose
-  file was deleted is dropped and fetched again. An **H.264** copy also answers
-  an HEVC request (H.264 plays everywhere), so the same recording is not stored
-  twice just because another browser or the download service asked for it.
+  file was deleted is dropped and fetched again. The one exception is a file
+  whose MP4 duration is clearly shorter than the interval in its name (a
+  download cut off before this fix): that one is replaced by a fresh download
+  once, then kept. An **H.264** copy also answers an HEVC request (H.264 plays
+  everywhere), so the same recording is not stored twice just because another
+  browser or the download service asked for it.
 - **The recordings list says which clips are already local.** Each row carries a
   cloud icon while the recording still has to come from the camera's SD card and
   a green check once it is saved in `media/ezviz_rtsp/`; the icon flips as soon
@@ -77,8 +80,12 @@ This project follows [Semantic Versioning](https://semver.org/).
   length in the list. The window now grows with the recording (with a minimum
   that still covers a camera waking up), a pause between packets is tolerated
   longer, and a clip that arrives clearly shorter than its interval is fetched
-  once more before it is served. The row's length also follows the file once it
-  plays, with the listed length in its tooltip when they differ.
+  once more before it is served. A clip saved by an older version is checked too:
+  its MP4 duration is read from the file, and a file shorter than its interval is
+  replaced by a fresh download instead of being replayed forever. Files are
+  written beside their target and moved into place, so a half-written MP4 is
+  never served. The row's length also follows the file once it plays, with the
+  listed length in its tooltip when they differ.
 - **A camera busy with another viewer (EZVIZ 5405) gets a few seconds.** Playback
   is retried twice, two seconds apart, before the card shows the error — enough
   for the relay to release a live session the card just stopped. The message now

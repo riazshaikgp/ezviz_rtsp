@@ -413,7 +413,9 @@ day of a camera's recordings and plays the one you tap, right in the card.
   controls (pause, seek, full screen). Tap another to switch, or close the
   player with ✕. The card shows "Fetching the recording from the camera…"
   while the clip is on its way.
-- **A recording already saved in the media folder is never fetched again.** It
+- **A recording already saved in the media folder is never fetched again** —
+  unless its file is clearly shorter than the interval in its name, which means
+  the download was cut off; then the card fetches it once more. It otherwise
   plays straight from `media/ezviz_rtsp/`, without waking the camera — the media
   folder is checked even when the in-memory index missed a file (a restored
   backup, a copy made by hand). An **H.264** copy also answers a request for
@@ -705,13 +707,15 @@ camera's storage in the EZVIZ app: the card may need formatting, or replacing.
 <details>
 <summary>A recording is shorter than the length shown next to it</summary>
 
-The length in the list comes from the camera's SD index. The camera can close
-the file a fraction of a second before the index says it ends; once the clip
-plays, the card replaces the row's length with the file's real duration (hover
-it to see both). A clip that arrives clearly short is fetched once more
-automatically, and the transfer window now grows with the recording, so a long
-clip is not cut off while it is still arriving. If a clip is still much shorter,
-the camera itself sent a shorter file; the integration log
+The length in the list comes from the camera's SD index. A file saved by an
+older version may have been cut off by the fixed transfer window: the card reads
+the MP4's real duration, and if it is clearly shorter than the interval, fetches
+the recording again automatically (once; a clip the camera itself sends short is
+kept as it is and not fetched on every play). The transfer window now grows with
+the recording, so a long clip is not cut off while it is still arriving. Once a
+clip plays, the row shows the file's real duration, with the listed length in
+its tooltip when they differ. If a clip is still much shorter, the camera itself
+sent a shorter file; the integration log
 (`custom_components.ezviz_rtsp.recordings`) says how many seconds it received
 and how many the index listed.
 
