@@ -225,6 +225,8 @@ async def test_websocket_lists_a_day_and_hands_out_a_clip(
     assert result["complete"] is True
     assert [r["start"][11:19] for r in result["recordings"]] == ["10:00:00", "09:00:00", "08:00:00"]
     assert result["recordings"][0]["seconds"] == 8
+    # Nothing has been saved to the media folder yet.
+    assert [r["local"] for r in result["recordings"]] == [False, False, False]
     calls = len(index.calls)
 
     # A past day is answered from the cache until a refresh is asked for.
@@ -269,11 +271,19 @@ async def test_websocket_lists_a_day_and_hands_out_a_clip(
     assert response.status == 206
     assert await response.read() == b"\0\0\0\x18"
 
+    # The downloaded clip is now marked local; the others still are not.
+    await ws.send_json(
+        {"id": 7, "type": "ezviz_rtsp/recordings", "serial": "BK1", "date": yesterday.isoformat()}
+    )
+    msg = await ws.receive_json()
+    assert msg["success"], msg
+    assert [r["local"] for r in msg["result"]["recordings"]] == [True, False, False]
+
     # Unknown cameras and bad input are refused with errors, not exceptions.
-    await ws.send_json({"id": 5, "type": "ezviz_rtsp/recordings", "serial": "NOPE"})
+    await ws.send_json({"id": 8, "type": "ezviz_rtsp/recordings", "serial": "NOPE"})
     assert (await ws.receive_json())["error"]["code"] == "not_found"
     await ws.send_json(
-        {"id": 6, "type": "ezviz_rtsp/recording/clip", "serial": "BK1", "begin": "x", "end": "y"}
+        {"id": 9, "type": "ezviz_rtsp/recording/clip", "serial": "BK1", "begin": "x", "end": "y"}
     )
     assert (await ws.receive_json())["error"]["code"] == "recording_failed"
 
@@ -286,6 +296,41 @@ async def test_websocket_lists_a_day_and_hands_out_a_clip(
     await hass.async_block_till_done()
     assert clip_file.exists()
     assert rec_module.DATA_RECORDINGS not in hass.data
+
+
+async def test_list_marks_a_clip_saved_in_either_format_as_local(
+    hass, hass_ws_client, _cloud
+) -> None:
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    tz = ZoneInfo("Africa/Johannesburg")
+    yesterday = datetime.now(tz).date() - timedelta(days=1)
+    starts = [
+        datetime.combine(yesterday, datetime.min.time()) + timedelta(hours=h)
+        for h in (8, 9)
+    ]
+    await _setup_with_index(hass, starts)
+    ws = await hass_ws_client(hass)
+    listing = {"id": 1, "type": "ezviz_rtsp/recordings", "serial": "BK1", "date": yesterday.isoformat()}
+    await ws.send_json(listing)
+    msg = await ws.receive_json()
+    assert msg["success"], msg
+    newer, older = msg["result"]["recordings"]
+    assert [newer["local"], older["local"]] == [False, False]
+
+    # Save only an H.264 copy of the older recording (as the download service
+    # does), then let the store index the folder again, as a restart would.
+    store = await rec_module.async_get_store(hass)
+    (store.root / f"BK1_{older['begin']}_{older['end']}_h264.mp4").write_bytes(b"mp4")
+    await rec_module.async_close_store(hass)
+    await rec_module.async_get_store(hass)
+
+    listing["id"] = 2
+    await ws.send_json(listing)
+    msg = await ws.receive_json()
+    assert msg["success"], msg
+    flags = {r["begin"]: r["local"] for r in msg["result"]["recordings"]}
+    assert flags[older["begin"]] is True
+    assert flags[newer["begin"]] is False
 
 
 async def test_clip_refused_while_the_camera_streams_live(hass, _cloud) -> None:

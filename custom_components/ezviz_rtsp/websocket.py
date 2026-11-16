@@ -25,6 +25,7 @@ from .recordings import (
     FORMATS,
     RecordingError,
     async_get_clip,
+    async_get_store,
     async_list_day,
     clip_path,
     find_camera,
@@ -150,6 +151,16 @@ async def ws_recordings(
     except RecordingError as err:
         connection.send_error(msg["id"], "recordings_failed", str(err))
         return
+    store = await async_get_store(hass)
+
+    def saved(begin: datetime, end: datetime) -> bool:
+        """Whether this recording is already in the media folder, in any format."""
+        begin_stamp, end_stamp = utc_stamp(begin), utc_stamp(end)
+        return any(
+            (camera.serial, begin_stamp, end_stamp, fmt) in store.clips
+            for fmt in FORMATS
+        )
+
     connection.send_result(
         msg["id"],
         {
@@ -163,6 +174,7 @@ async def ws_recordings(
                     "end": utc_stamp(end),
                     "start": begin.isoformat(),
                     "seconds": int((end - begin).total_seconds()),
+                    "local": saved(begin, end),
                 }
                 for begin, end in reversed(recordings)
             ],

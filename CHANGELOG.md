@@ -56,6 +56,11 @@ This project follows [Semantic Versioning](https://semver.org/).
   file was deleted is dropped and fetched again. An **H.264** copy also answers
   an HEVC request (H.264 plays everywhere), so the same recording is not stored
   twice just because another browser or the download service asked for it.
+- **The recordings list says which clips are already local.** Each row carries a
+  cloud icon while the recording still has to come from the camera's SD card and
+  a green check once it is saved in `media/ezviz_rtsp/`; the icon flips as soon
+  as the clip is played. Both the video card's list and the **EZVIZ Recordings**
+  card show it.
 
 ### Changed
 - Requires **pyezvizapi 2.5.1** (was 1.0.5.0). 2.0.0 added SD playback through

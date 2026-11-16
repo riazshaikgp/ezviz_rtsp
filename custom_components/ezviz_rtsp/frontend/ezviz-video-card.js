@@ -127,7 +127,9 @@ const STRINGS = /* translations */ {
     "rec_next": "Next day",
     "rec_refresh": "Refresh",
     "rec_pick": "Tap a recording to play it",
-    "rec_close": "Close player"
+    "rec_close": "Close player",
+    "rec_cloud": "On the camera's SD card — tap to save it locally",
+    "rec_local": "Saved in the media folder"
   },
   "uk": {
     "play": "Дивитися",
@@ -174,7 +176,9 @@ const STRINGS = /* translations */ {
     "rec_next": "Наступний день",
     "rec_refresh": "Оновити",
     "rec_pick": "Торкніться запису, щоб відтворити",
-    "rec_close": "Закрити плеєр"
+    "rec_close": "Закрити плеєр",
+    "rec_cloud": "На SD-картці камери — торкніться, щоб зберегти локально",
+    "rec_local": "Збережено в media"
   }
 } /* end translations */;
 
@@ -361,6 +365,8 @@ const style = /* css */ `
   .recRow ha-icon { --mdc-icon-size: 18px; color: var(--primary-color); flex: 0 0 auto; }
   .recRow .time { font-variant-numeric: tabular-nums; flex: 1 1 auto; }
   .recRow .len { font-size: 12px; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; }
+  .recRow .where { --mdc-icon-size: 16px; flex: 0 0 auto; color: var(--secondary-text-color); }
+  .recRow .where.local { color: var(--success-color, #43a047); }
   .recNote { padding: 16px 12px; text-align: center; font-size: 13px; color: var(--secondary-text-color); }
   .recNote.error { color: var(--error-color, #db4437); }
 
@@ -1303,7 +1309,12 @@ class EzvizVideoCard extends HTMLElement {
       const len = document.createElement("span");
       len.className = "len";
       len.textContent = `${rec.seconds} s`;
-      row.append(icon, time, len);
+      // Cloud-only clips have to be fetched; the check says one is saved.
+      const where = document.createElement("ha-icon");
+      where.className = "where" + (rec.local ? " local" : "");
+      where.setAttribute("icon", rec.local ? "mdi:check-circle" : "mdi:cloud-outline");
+      where.title = t(this._lang, rec.local ? "rec_local" : "rec_cloud");
+      row.append(icon, time, len, where);
       row.addEventListener("click", () => this._playRecording(rec));
       frag.append(row);
     }
@@ -1341,6 +1352,7 @@ class EzvizVideoCard extends HTMLElement {
         format,
       });
       if (gen !== this._clipGen || !this._recordings) return;
+      rec.local = true; // it is in the media folder from now on
       this._clipState = "playing";
       this._clipFormat = format;
       this._render();
@@ -2006,6 +2018,8 @@ const recordingsStyle = /* css */ `
   .row ha-icon { --mdc-icon-size: 18px; color: var(--primary-color); flex: 0 0 auto; }
   .row .time { font-variant-numeric: tabular-nums; flex: 1 1 auto; }
   .row .len { font-size: 12px; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; }
+  .row .where { flex: 0 0 auto; display: inline-flex; --mdc-icon-size: 16px; color: var(--secondary-text-color); }
+  .row .where.local { color: var(--success-color, #43a047); }
   .note { padding: 16px 12px; text-align: center; font-size: 13px; color: var(--secondary-text-color); }
   .note.error { color: var(--error-color, #db4437); }
 `;
@@ -2206,6 +2220,7 @@ class EzvizRecordingsCard extends HTMLElement {
         format,
       });
       if (gen !== this._clipGen) return;
+      rec.local = true; // it is in the media folder from now on
       this._clipState = "playing";
       this._clipFormat = format;
       this._render();
@@ -2303,6 +2318,7 @@ class EzvizRecordingsCard extends HTMLElement {
         rows.push(`<button class="row${on ? " on" : ""}" data-i="${i}">
           <ha-icon icon="${on ? "mdi:play-circle" : "mdi:play-circle-outline"}"></ha-icon>
           <span class="time">${esc(time)}</span><span class="len">${rec.seconds} s</span>
+          <span class="where${rec.local ? " local" : ""}" title="${esc(t(lang, rec.local ? "rec_local" : "rec_cloud"))}"><ha-icon icon="${rec.local ? "mdi:check-circle" : "mdi:cloud-outline"}"></ha-icon></span>
         </button>`);
       });
       body = rows.join("");

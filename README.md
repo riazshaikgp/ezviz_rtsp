@@ -429,6 +429,10 @@ max_height: 360                # optional; height of the list in pixels
   backup, a copy made by hand). An **H.264** copy also answers a request for
   HEVC, since H.264 plays in every browser; the other way round is not done,
   because HEVC does not.
+- At the right of each row, a small icon says where the clip is: a **cloud** for
+  one that still has to be fetched from the camera, a green **check** for one
+  already saved under `media/ezviz_rtsp/` (in either format). It turns into a
+  check as soon as you play the clip.
 - The list is read the first time the card is on screen, not when a dashboard
   merely contains it; a card that leaves the screen pauses its player.
 
