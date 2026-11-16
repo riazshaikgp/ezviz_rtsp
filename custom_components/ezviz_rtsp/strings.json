@@ -79,6 +79,9 @@
       },
       "request_snapshot": {
         "name": "Request snapshot"
+      },
+      "download_recording": {
+        "name": "Download latest recording"
       }
     },
     "image": {
@@ -122,6 +125,9 @@
     "sensor": {
       "alarm_sound_mod": {
         "name": "Alarm sound level"
+      },
+      "latest_recording": {
+        "name": "Latest recording"
       },
       "last_alarm_time": {
         "name": "Last alarm time"
@@ -312,6 +318,16 @@
         }
       },
       "name": "Capture picture"
+    },
+    "download_recording": {
+      "description": "Finds the camera's newest SD-card recording (today, or yesterday when today has none), downloads it through the EZVIZ cloud and saves it as an MP4 under the media folder (media/ezviz_rtsp). Wakes battery cameras. Returns the file's path and interval.",
+      "fields": {
+        "format": {
+          "description": "The video format to save: h264 (converted, plays everywhere) or hevc (the camera's own, only repackaged).",
+          "name": "Format"
+        }
+      },
+      "name": "Download latest recording"
     },
     "set_alarm_detection_sensibility": {
       "description": "Changes the sensibility level of the motion detection.",

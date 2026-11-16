@@ -404,6 +404,57 @@ max_height: 360                # optional; height of the list in pixels
 - The list is read the first time the card is on screen, not when a dashboard
   merely contains it; a card that leaves the screen pauses its player.
 
+### Getting the latest recording on demand
+
+Just like a fresh picture, the newest recording can be fetched without opening
+the card. Call the **`ezviz_rtsp.download_recording`** service on a camera:
+
+```yaml
+action: ezviz_rtsp.download_recording
+target:
+  entity_id: camera.driveway_gate
+data:
+  format: h264          # optional; h264 (default) or hevc
+```
+
+It finds the newest recording of **today** (or **yesterday**, when the camera
+has not recorded anything yet today), downloads it through the EZVIZ cloud and
+saves it as an MP4 under `media/ezviz_rtsp/` — the same place the card keeps its
+clips, so the retention setting applies. The camera is woken, so expect the same
+15–30 seconds as playing a recording in the card, and the same "one viewer at a
+time" rule (stop the live view first).
+
+Every camera also gets a **Download latest recording** button in its
+**Controls** section, so it can be pressed by hand. Both the service and the
+button update the camera's **Latest recording** sensor
+(`sensor.<camera>_latest_recording`): its state is the recording's start time and
+its attributes carry the file path, the interval and the format. The sensor is
+kept in memory, so it is empty again after a restart until the next download.
+
+| Service data | Default | What it does |
+|---|---|---|
+| `format` | `h264` | `h264` is converted by Home Assistant and plays in every browser and player; `hevc` keeps the camera's own stream and is only repackaged, so it is quicker but plays on fewer players. |
+
+Ask for a response when you want the file, for example to send it or hand it to
+another tool:
+
+```yaml
+actions:
+  - action: ezviz_rtsp.download_recording
+    target:
+      entity_id: camera.driveway_gate
+    response_variable: clip
+  - action: notify.mobile_app_phone
+    data:
+      message: "Latest recording at the driveway gate"
+      data:
+        video: "{{ clip.path }}"
+```
+
+The response carries `serial`, `begin`/`end` (UTC), `start` (local time),
+`seconds`, `format` and `path` (the file's path on the Home Assistant host). The
+recording is also readable from the **Media** browser under `ezviz_rtsp`.
+
 ### What it costs, and what to expect
 
 - **Battery.** Both listing and playing go through the camera itself: the SD

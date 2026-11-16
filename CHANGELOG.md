@@ -22,6 +22,12 @@ This project follows [Semantic Versioning](https://semver.org/).
   Downloaded recordings** you choose how many days those MP4s are kept
   (default 7, `0` keeps them). Older files are swept at start-up and whenever a
   new clip is downloaded.
+- **The latest recording on demand.** The **Download latest recording** button
+  and the `ezviz_rtsp.download_recording` service fetch a camera's newest SD-card
+  recording (today, or yesterday when today has none) into the media folder —
+  the recording counterpart of `capture_picture`. A **Latest recording** sensor
+  (`sensor.<camera>_latest_recording`) shows the file's start time, path,
+  interval and format.
 
 ### Changed
 - Requires **pyezvizapi 2.0.0** (was 1.0.5.0), which added SD playback through

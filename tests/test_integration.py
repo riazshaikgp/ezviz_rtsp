@@ -83,12 +83,19 @@ async def _setup(hass) -> MockConfigEntry:
         unique_id="owner@example.com",
     )
     entry.add_to_hass(hass)
-    # Only the platforms this fork adds to: the camera and its button.
+    # Only the platforms this fork adds to: the camera, its button, images, sensors.
     with (
         patch("custom_components.ezviz_rtsp.EzvizClient", _FakeClient),
         patch.dict(
             "custom_components.ezviz_rtsp.PLATFORMS_BY_TYPE",
-            {ATTR_TYPE_CLOUD: [Platform.CAMERA, Platform.BUTTON, Platform.IMAGE]},
+            {
+                ATTR_TYPE_CLOUD: [
+                    Platform.CAMERA,
+                    Platform.BUTTON,
+                    Platform.IMAGE,
+                    Platform.SENSOR,
+                ]
+            },
         ),
         patch("custom_components.ezviz_rtsp.camera.get_ffmpeg_manager"),
     ):
@@ -120,10 +127,12 @@ async def test_battery_camera_sets_up_and_offers_a_cloud_stream(hass) -> None:
     assert entry.options["internal_token"]
     assert hass.data[DATA_LIVE_VIEW] is True
 
-    # The camera gets a Request snapshot button in Controls, even without PTZ.
+    # The camera gets a Request snapshot and a Download latest recording button
+    # in Controls, even without PTZ.
     button_ids = hass.states.async_entity_ids("button")
-    assert len(button_ids) == 1, button_ids
-    assert button_ids[0].endswith("_request_snapshot")
+    assert len(button_ids) == 2, button_ids
+    assert any(entity.endswith("_request_snapshot") for entity in button_ids)
+    assert any(entity.endswith("_download_latest_recording") for entity in button_ids)
 
     # A battery camera must not trigger the RTSP discovery flow.
     assert hass.config_entries.flow.async_progress() == []

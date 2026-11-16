@@ -39,6 +39,7 @@ from zoneinfo import ZoneInfo
 from aiohttp import web
 from homeassistant.const import CONF_TYPE
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.http import KEY_HASS, HomeAssistantView
 
 from .const import (
@@ -47,6 +48,7 @@ from .const import (
     CONF_RECORDINGS_KEEP_DAYS,
     DEFAULT_RECORDINGS_KEEP_DAYS,
     DOMAIN,
+    SIGNAL_RECORDING_DOWNLOADED,
 )
 
 if TYPE_CHECKING:
@@ -528,6 +530,45 @@ async def async_get_clip(
         store.pending.pop(key, None)
     future.set_result(path)
     return path
+
+
+async def async_latest_recording(
+    hass: HomeAssistant, camera: Camera, *, fmt: str = "h264"
+) -> tuple[datetime, datetime, Path]:
+    """The camera's newest SD-card recording, downloaded now.
+
+    Looks at today first and falls back to yesterday, so a camera that has not
+    recorded anything yet today still answers with its last recording.
+    """
+    tz = ZoneInfo(hass.config.time_zone)
+    today = datetime.now(tz).date()
+    for day in (today, today - timedelta(days=1)):
+        recordings, _ = await async_list_day(hass, camera, day)
+        if recordings:
+            begin, end = recordings[-1]
+            path = await async_get_clip(hass, camera, begin, end, fmt)
+            return begin, end, path
+    raise RecordingError("No recordings were found for today or yesterday")
+
+
+async def async_download_latest(
+    hass: HomeAssistant, camera: Camera, *, fmt: str = "h264"
+) -> dict[str, Any]:
+    """Download the newest recording and announce it to the latest-recording sensors."""
+    begin, end, path = await async_latest_recording(hass, camera, fmt=fmt)
+    recording: dict[str, Any] = {
+        "serial": camera.serial,
+        "begin": utc_stamp(begin),
+        "end": utc_stamp(end),
+        "start": begin.isoformat(),
+        "seconds": int((end - begin).total_seconds()),
+        "format": fmt,
+        "path": str(path),
+    }
+    async_dispatcher_send(
+        hass, SIGNAL_RECORDING_DOWNLOADED.format(camera.serial), recording
+    )
+    return recording
 
 
 async def _async_fetch(

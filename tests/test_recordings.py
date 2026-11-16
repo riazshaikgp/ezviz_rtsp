@@ -7,17 +7,18 @@ import json
 import os
 import time
 import zlib
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
 from pyezvizapi.exceptions import PyEzvizError
 
 from custom_components.ezviz_rtsp import recordings as rec_module
-from custom_components.ezviz_rtsp.const import DOMAIN
+from custom_components.ezviz_rtsp.const import DOMAIN, SIGNAL_RECORDING_DOWNLOADED
 from custom_components.ezviz_rtsp.recordings import (
     MAX_PAGES,
     PAGE_SIZE,
@@ -331,3 +332,176 @@ async def test_downloaded_clips_are_pruned_by_retention(hass, _cloud) -> None:
     with patch.object(rec_module, "_keep_days", return_value=0):
         assert await rec_module.async_prune_recordings(hass) == 0
     assert stale.exists()
+
+
+# -- the latest recording: service, button and sensor ----------------------------
+
+
+@contextmanager
+def _clip_available():
+    """Enter the patchers that stand in for the camera read and the ffmpeg conversion."""
+    with (
+        patch.object(rec_module, "_download_clip", return_value=b"PSDATA"),
+        patch.object(
+            rec_module,
+            "_async_to_mp4",
+            side_effect=lambda _bin, ps, fmt, target: target.write_bytes(b"mp4"),
+        ),
+        patch("custom_components.ezviz_rtsp.live.ffmpeg_binary", return_value="ffmpeg"),
+    ):
+        yield
+
+
+def _bare_camera() -> rec_module.Camera:
+    return rec_module.Camera(coordinator=MagicMock(), serial="BK1", code=None)
+
+
+def _bare_hass() -> MagicMock:
+    hass = MagicMock()
+    hass.config.time_zone = "Africa/Johannesburg"
+    return hass
+
+
+async def test_latest_recording_prefers_today() -> None:
+    tz = ZoneInfo("Africa/Johannesburg")
+    today = datetime.now(tz).date()
+    newest = (
+        datetime(2026, 11, 10, 9, 0, tzinfo=tz),
+        datetime(2026, 11, 10, 9, 0, 8, tzinfo=tz),
+    )
+    seen: list[date] = []
+
+    async def fake_list(_hass, _camera, day, *, refresh=False):
+        seen.append(day)
+        return ([newest], True) if day == today else ([], True)
+
+    with (
+        patch.object(rec_module, "async_list_day", fake_list),
+        patch.object(rec_module, "async_get_clip", return_value=Path("/media/today.mp4")),
+    ):
+        begin, end, path = await rec_module.async_latest_recording(_bare_hass(), _bare_camera())
+
+    assert seen == [today]
+    assert (begin, end) == newest
+    assert path == Path("/media/today.mp4")
+
+
+async def test_latest_recording_falls_back_to_yesterday() -> None:
+    tz = ZoneInfo("Africa/Johannesburg")
+    today = datetime.now(tz).date()
+    yesterday = today - timedelta(days=1)
+    older = (
+        datetime(2026, 11, 9, 9, 0, tzinfo=tz),
+        datetime(2026, 11, 9, 9, 0, 8, tzinfo=tz),
+    )
+    seen: list[date] = []
+
+    async def fake_list(_hass, _camera, day, *, refresh=False):
+        seen.append(day)
+        return ([older], True) if day == yesterday else ([], True)
+
+    with (
+        patch.object(rec_module, "async_list_day", fake_list),
+        patch.object(rec_module, "async_get_clip", return_value=Path("/media/yesterday.mp4")),
+    ):
+        begin, _end, path = await rec_module.async_latest_recording(_bare_hass(), _bare_camera())
+
+    assert seen == [today, yesterday]
+    assert begin == older[0]
+    assert path == Path("/media/yesterday.mp4")
+
+
+async def test_latest_recording_raises_when_there_are_none() -> None:
+    async def fake_list(*_args, **_kwargs):
+        return [], True
+
+    with (
+        patch.object(rec_module, "async_list_day", fake_list),
+        pytest.raises(RecordingError, match="No recordings"),
+    ):
+        await rec_module.async_latest_recording(_bare_hass(), _bare_camera())
+
+
+async def test_download_latest_announces_the_recording() -> None:
+    tz = ZoneInfo("Africa/Johannesburg")
+    begin = datetime(2026, 11, 10, 9, 0, tzinfo=tz)
+    end = begin + timedelta(seconds=8)
+
+    with (
+        patch.object(
+            rec_module,
+            "async_latest_recording",
+            return_value=(begin, end, Path("/media/BK1_x.mp4")),
+        ),
+        patch.object(rec_module, "async_dispatcher_send") as send,
+    ):
+        result = await rec_module.async_download_latest(_bare_hass(), _bare_camera())
+
+    assert result["serial"] == "BK1"
+    assert result["format"] == "h264"
+    assert result["seconds"] == 8
+    assert result["path"] == "/media/BK1_x.mp4"
+    send.assert_called_once()
+    assert send.call_args.args[1] == SIGNAL_RECORDING_DOWNLOADED.format("BK1")
+    assert send.call_args.args[2] == result
+
+
+async def _yesterday_camera(hass) -> None:
+    tz = ZoneInfo("Africa/Johannesburg")
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    yesterday = datetime.now(tz).date() - timedelta(days=1)
+    starts = [
+        datetime.combine(yesterday, datetime.min.time()) + timedelta(hours=h) for h in (8, 9)
+    ]
+    await _setup_with_index(hass, starts)
+
+
+async def test_download_recording_service_updates_the_sensor(hass, _cloud) -> None:
+    await _yesterday_camera(hass)
+    sensor_id = next(
+        entity
+        for entity in hass.states.async_entity_ids("sensor")
+        if entity.endswith("_latest_recording")
+    )
+    assert hass.states.get(sensor_id).state == "unknown"
+    camera_id = next(iter(hass.states.async_entity_ids("camera")))
+
+    with _clip_available():
+        response = await hass.services.async_call(
+            DOMAIN,
+            "download_recording",
+            {"entity_id": camera_id},
+            blocking=True,
+            return_response=True,
+        )
+
+    recording = response[camera_id]
+    assert recording["serial"] == "BK1"
+    assert recording["format"] == "h264"
+    assert recording["seconds"] == 8
+    state = hass.states.get(sensor_id)
+    assert state.state != "unknown"
+    assert state.attributes["path"].endswith(".mp4")
+    assert state.attributes["format"] == "h264"
+
+
+async def test_download_recording_button_updates_the_sensor(hass, _cloud) -> None:
+    await _yesterday_camera(hass)
+    sensor_id = next(
+        entity
+        for entity in hass.states.async_entity_ids("sensor")
+        if entity.endswith("_latest_recording")
+    )
+    button_id = next(
+        entity
+        for entity in hass.states.async_entity_ids("button")
+        if entity.endswith("_download_latest_recording")
+    )
+
+    with _clip_available():
+        await hass.services.async_call(
+            "button", "press", {"entity_id": button_id}, blocking=True
+        )
+        await hass.async_block_till_done()
+
+    assert hass.states.get(sensor_id).state != "unknown"

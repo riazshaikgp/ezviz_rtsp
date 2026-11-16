@@ -50,12 +50,16 @@ ATTR_LEVEL = "level"
 ATTR_TYPE = "type_value"
 ATTR_MIN_INTERVAL = "min_interval"
 ATTR_AUTOMATIC = "automatic"
+ATTR_FORMAT = "format"
 
 # Service names
 SERVICE_WAKE_DEVICE = "wake_device"
 # Take a picture through the cloud on demand (shown by the camera's Snapshot image)
 SERVICE_CAPTURE_PICTURE = "capture_picture"
 SIGNAL_PICTURE_CAPTURED = "ezviz_rtsp_picture_captured_{}"
+# Download the camera's latest SD-card recording to the media folder on demand
+SERVICE_DOWNLOAD_RECORDING = "download_recording"
+SIGNAL_RECORDING_DOWNLOADED = "ezviz_rtsp_recording_downloaded_{}"
 DEFAULT_AUTO_SNAPSHOT = True
 DEFAULT_SNAPSHOT_INTERVAL = 300
 DEFAULT_RECORDINGS_KEEP_DAYS = 7

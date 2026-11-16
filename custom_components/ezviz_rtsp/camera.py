@@ -28,6 +28,7 @@ from pyezvizapi.utils import decrypt_image
 
 from .const import (
     ATTR_AUTOMATIC,
+    ATTR_FORMAT,
     ATTR_LEVEL,
     ATTR_MIN_INTERVAL,
     ATTR_SERIAL,
@@ -42,12 +43,14 @@ from .const import (
     DOMAIN,
     SERVICE_CAPTURE_PICTURE,
     SERVICE_DETECTION_SENSITIVITY,
+    SERVICE_DOWNLOAD_RECORDING,
     SERVICE_WAKE_DEVICE,
     SIGNAL_PICTURE_CAPTURED,
 )
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
 from .entity import EzvizEntity
 from .live import LiveStream, stream_source
+from .recordings import FORMATS, RecordingError, async_download_latest, find_camera
 
 try:
     # pyezvizapi's own parser for capture responses (used by EzvizClient.save_image); it accepts
@@ -231,6 +234,12 @@ async def async_setup_entry(
             vol.Optional(ATTR_AUTOMATIC, default=False): cv.boolean,
         },
         "async_capture_picture",
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    platform.async_register_entity_service(
+        SERVICE_DOWNLOAD_RECORDING,
+        {vol.Optional(ATTR_FORMAT, default="h264"): vol.In(FORMATS)},
+        "async_download_recording",
         supports_response=SupportsResponse.OPTIONAL,
     )
     platform.async_register_entity_service(
@@ -440,6 +449,22 @@ class EzvizCamera(EzvizEntity, Camera):
         return await async_request_snapshot(
             self.hass, self.coordinator, self._serial, min_interval=min_interval or 0
         )
+
+    async def async_download_recording(self, format: str = "h264") -> ServiceResponse:
+        """Download the camera's latest SD-card recording into the media folder.
+
+        Finds the newest recording of today (or yesterday, when today has none),
+        fetches it through the EZVIZ cloud and saves it as an MP4 under
+        ``media/ezviz_rtsp``. Its details are also announced to the camera's
+        Latest recording sensor.
+        """
+        camera = find_camera(self.hass, self._serial)
+        if camera is None:
+            raise HomeAssistantError("The camera is not available")
+        try:
+            return await async_download_latest(self.hass, camera, fmt=format)
+        except RecordingError as err:
+            raise HomeAssistantError(str(err)) from err
 
     def set_alarm_detection_sensibility(
         self, level: int, type_value: int = 0
