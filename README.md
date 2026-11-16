@@ -424,8 +424,10 @@ day of a camera's recordings and plays the one you tap, right in the card.
 - **Tapping several recordings in a row** while one is still being fetched only
   remembers the newest: the ones in between are not downloaded, so the camera is
   not woken for clips you skipped. The waiting view says "Waiting for the
-  current recording to finish…". A recording already saved in the media folder
-  still plays at once, without waiting for that download to finish.
+  current recording to finish…". Tapping the recording that is being fetched
+  again brings **its progress bar** back, and it plays as soon as it lands. A
+  recording already saved in the media folder still plays at once, without
+  waiting for that download to finish.
 - **A recording already saved in the media folder is never fetched again** —
   unless its file is clearly shorter than the interval in its name, which means
   the download was cut off; then the card fetches it once more. It otherwise

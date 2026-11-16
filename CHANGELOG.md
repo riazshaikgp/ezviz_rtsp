@@ -67,6 +67,14 @@ This project follows [Semantic Versioning](https://semver.org/).
   the month was last checked and whether the check was complete.
 
 ### Fixed
+- **Coming back to a clip that is downloading shows its progress bar again.**
+  Tapping another recording while one was being fetched is a queued tap, and
+  tapping the fetching one again was treated the same way, so the card kept
+  saying "Waiting for the current recording to finish…" instead of returning to
+  the bar. The fetch now remembers which recording it belongs to: selecting
+  that row brings the progress bar back (with an immediate report rather than
+  waiting for the next poll) and the clip plays as soon as it lands, while a
+  row tapped in the meantime keeps the queued message.
 - **Live view waits for a clip download instead of failing it.** Pressing live
   while a recording was still coming off the SD card used to start a second
   EZVIZ session that the camera refuses, so both the clip and the live view

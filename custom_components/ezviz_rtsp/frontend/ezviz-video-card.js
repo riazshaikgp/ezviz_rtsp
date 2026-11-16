@@ -515,6 +515,8 @@ const style = /* css */ `
   }
 `;
 
+const sameRecording = (a, b) => Boolean(a && b) && a.begin === b.begin && a.end === b.end;
+
 class EzvizVideoCard extends HTMLElement {
   constructor() {
     super();
@@ -1780,17 +1782,34 @@ class EzvizVideoCard extends HTMLElement {
     // One camera download at a time. A tap while one is in flight only
     // remembers the newest recording; the intermediate ones are never fetched.
     if (this._clipFetching) {
-      this._clipGen++; // the download in flight no longer owns the view
+      const fetching = this._clipFetching;
+      // Coming back to the clip that is downloading is not a queued tap: the
+      // viewer wants the bar again, and the clip plays itself when it lands.
+      const same = fetching.rec && sameRecording(fetching.rec, rec);
+      // The fetch still owns the view when nothing switched away from it, so it
+      // plays by itself; otherwise the row is remembered to be started once the
+      // camera is free.
+      const ownsView = Boolean(same) && fetching.gen === this._clipGen;
+      if (!same) this._clipGen++; // the download in flight no longer owns the view
       this._clipVideo?.pause();
       this._selected = rec;
       this._clipState = "fetching";
       this._clipError = "";
-      this._clipQueued = true;
+      this._clipQueued = !same;
       this._clipIncomplete = Boolean(rec.incomplete);
-      this._queuedClip = { rec, fallback };
-      // The tap is for another clip now: stop watching the one in flight.
+      // Either way the clip is wanted: it plays as soon as the camera is free,
+      // and leaving it for another one never fetches the intermediate ones.
+      this._queuedClip = ownsView ? null : { rec, fallback };
       this._stopProgress();
       this._render();
+      if (same) {
+        this._startProgress(
+          serial,
+          rec,
+          fetching.format || this._recFormat(fallback),
+          this._clipGen
+        );
+      }
       return;
     }
     this._startClip(rec, fallback, true);
@@ -1807,9 +1826,11 @@ class EzvizVideoCard extends HTMLElement {
     this._clipError = "";
     this._clipQueued = false;
     this._clipIncomplete = Boolean(rec.incomplete);
-    const ticket = cloud ? {} : null;
-    if (ticket) this._clipFetching = ticket;
     const format = this._recFormat(fallback);
+    // The ticket remembers which recording it is fetching, so tapping that row
+    // again can bring the progress bar back instead of queueing it.
+    const ticket = cloud ? { rec, format, gen } : null;
+    if (ticket) this._clipFetching = ticket;
     this._stopProgress();
     this._render();
     if (ticket) this._startProgress(serial, rec, format, gen);
@@ -1906,6 +1927,7 @@ class EzvizVideoCard extends HTMLElement {
       }
     };
     this._progressTimer = setInterval(ask, 600);
+    ask();
   }
 
   _stopProgress() {
