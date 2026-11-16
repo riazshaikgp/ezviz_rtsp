@@ -34,7 +34,7 @@ import zlib
 from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
@@ -108,6 +108,7 @@ class RecordingStore:
     """Per Home Assistant: the day lists, the clip index and its locks."""
 
     root: Path
+    tz: tzinfo
     days: dict[tuple[str, date], _Day] = field(default_factory=dict)
     clips: OrderedDict[tuple[str, str, str, str], Path] = field(default_factory=OrderedDict)
     # Clips watched with saving off: files in the temp folder, never indexed in
@@ -149,22 +150,49 @@ def _key_from_name(name: str) -> tuple[str, str, str, str] | None:
     return parts[0], parts[1], parts[2], parts[3]
 
 
-def _prepare_store(root: Path) -> RecordingStore:
+def _clip_name(key: tuple[str, str, str, str]) -> str:
+    """The MP4's file name: serial, interval and format."""
+    serial, begin, end, fmt = key
+    return f"{serial}_{begin}_{end}_{fmt}.mp4"
+
+
+def _clip_folder(tz: tzinfo, begin: str) -> Path:
+    """The folder of a recording: the year, month and local day it started on."""
+    return Path(parse_stamp(begin).astimezone(tz).strftime("%Y/%m/%d"))
+
+
+def _clip_path(store: RecordingStore, key: tuple[str, str, str, str]) -> Path:
+    """Where a new copy of the recording goes: media/ezviz_rtsp/YYYY/MM/DD."""
+    return store.root / _clip_folder(store.tz, key[1]) / _clip_name(key)
+
+
+def _prepare_store(root: Path, tz: tzinfo) -> RecordingStore:
     """Make the media folder and index the MP4s already in it. Blocking.
 
-    Runs in the executor: the folder can hold thousands of clips after a long
-    retention, so neither the mkdir nor the glob may run in the event loop.
+    Clips live in year/month/day folders; a file saved flat by an older version
+    is moved into its day's folder once, then indexed like the rest. Runs in the
+    executor: the folder can hold thousands of clips after a long retention, so
+    neither the mkdir nor the walk may run in the event loop.
     """
     root.mkdir(parents=True, exist_ok=True)
-    store = RecordingStore(root)
+    store = RecordingStore(root, tz)
     try:
-        files = sorted(root.glob("*.mp4"), key=lambda path: path.stat().st_mtime)
+        files = sorted(root.rglob("*.mp4"), key=lambda path: path.stat().st_mtime)
     except OSError:
         return store
     for path in files:
         key = _key_from_name(path.name)
-        if key is not None:
-            store.clips[key] = path
+        if key is None:
+            continue
+        if path.parent == root:
+            target = root / _clip_folder(tz, key[1]) / path.name
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                path.rename(target)
+                path = target
+            except OSError:
+                pass
+        store.clips[key] = path
     return store
 
 
@@ -174,16 +202,19 @@ def _saved_clip(store: RecordingStore, key: tuple[str, str, str, str]) -> Path |
     The requested format wins. An H.264 copy also answers an HEVC request:
     H.264 plays in every browser, so fetching or converting the same recording
     again would only wake the camera and read its SD card for nothing. The
-    reverse is not done — an HEVC file does not play everywhere.
+    reverse is not done — an HEVC file does not play everywhere. The old flat
+    layout is checked too, so clips saved before the day folders still count.
     """
     serial, begin, end, fmt = key
-    path = store.root / f"{serial}_{begin}_{end}_{fmt}.mp4"
-    if path.is_file():
-        return path
+    names = [_clip_name(key)]
     if fmt == "hevc":
-        fallback = store.root / f"{serial}_{begin}_{end}_h264.mp4"
-        if fallback.is_file():
-            return fallback
+        names.append(f"{serial}_{begin}_{end}_h264.mp4")
+    folder = store.root / _clip_folder(store.tz, begin)
+    for base in (folder, store.root):
+        for name in names:
+            path = base / name
+            if path.is_file():
+                return path
     return None
 
 
@@ -239,7 +270,9 @@ async def async_get_store(hass: HomeAssistant) -> RecordingStore:
     async with lock:
         if (store := hass.data.get(DATA_RECORDINGS)) is not None:
             return store
-        store = await hass.async_add_executor_job(_prepare_store, media_root(hass))
+        store = await hass.async_add_executor_job(
+            _prepare_store, media_root(hass), ZoneInfo(hass.config.time_zone)
+        )
         hass.data[DATA_RECORDINGS] = store
         return store
 
@@ -265,14 +298,31 @@ def _prune(root: Path, keep_days: int) -> list[str]:
         return []
     cutoff = time.time() - keep_days * 86400
     removed: list[str] = []
-    for path in root.glob("*.mp4"):
+    for path in root.rglob("*.mp4"):
         try:
             if path.stat().st_mtime < cutoff:
                 path.unlink()
                 removed.append(path.name)
+                # Leave no empty year/month/day folders behind.
+                _drop_empty_dirs(path.parent, root)
         except OSError:
             pass
     return removed
+
+
+def _drop_empty_dirs(folder: Path, root: Path) -> None:
+    """Remove the folders a deleted clip left empty, up to the media folder."""
+    while folder != root and folder != folder.parent:
+        try:
+            folder.rmdir()
+        except OSError:
+            return
+        folder = folder.parent
+
+
+def _ensure_parent(path: Path) -> None:
+    """Make the clip's folder (a day folder, or the temp folder). Blocking."""
+    path.parent.mkdir(parents=True, exist_ok=True)
 
 
 async def async_prune_recordings(hass: HomeAssistant) -> int:
@@ -756,11 +806,13 @@ async def _async_fetch(
     if live is not None and live.active:
         raise RecordingError("The camera is streaming live; stop the live view first")
     if keep:
-        target_dir = store.root
+        # Filed by the recording's local day: media/ezviz_rtsp/YYYY/MM/DD.
+        target = _clip_path(store, key)
     else:
         target_dir = root or await hass.async_add_executor_job(
             _prepare_temp_root, temp_root(hass)
         )
+        target = target_dir / _clip_name(key)
     started = time.monotonic()
     async with store.lock(serial):
         ps = await hass.async_add_executor_job(
@@ -773,7 +825,7 @@ async def _async_fetch(
             camera.code,
         )
     fetched = time.monotonic()
-    target = target_dir / f"{serial}_{begin}_{end}_{fmt}.mp4"
+    await hass.async_add_executor_job(_ensure_parent, target)
     await _async_to_mp4(ffmpeg_binary(hass), ps, fmt, target)
     _LOGGER.debug(
         "Recording %s %s-%s: %d bytes from the camera in %.1f s, %s MP4 in %.1f s",

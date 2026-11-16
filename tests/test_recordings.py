@@ -288,9 +288,14 @@ async def test_websocket_lists_a_day_and_hands_out_a_clip(
     )
     assert (await ws.receive_json())["error"]["code"] == "recording_failed"
 
-    # The clip lives under the media folder and survives an unload.
+    # The clip lives under the media folder, in the folder of its local day, and
+    # survives an unload.
     root = (await rec_module.async_get_store(hass)).root
-    clip_file = root / f"BK1_{newest['begin']}_{newest['end']}_hevc.mp4"
+    clip_file = (
+        root
+        / yesterday.strftime("%Y/%m/%d")
+        / f"BK1_{newest['begin']}_{newest['end']}_hevc.mp4"
+    )
     assert root == rec_module.media_root(hass)
     assert clip_file.exists()
     assert await hass.config_entries.async_unload(entry.entry_id)
@@ -321,7 +326,9 @@ async def test_list_marks_a_clip_saved_in_either_format_as_local(
     # Save only an H.264 copy of the older recording (as the download service
     # does), then let the store index the folder again, as a restart would.
     store = await rec_module.async_get_store(hass)
-    (store.root / f"BK1_{older['begin']}_{older['end']}_h264.mp4").write_bytes(b"mp4")
+    saved = rec_module._clip_path(store, ("BK1", older["begin"], older["end"], "h264"))
+    saved.parent.mkdir(parents=True)
+    saved.write_bytes(b"mp4")
     await rec_module.async_close_store(hass)
     await rec_module.async_get_store(hass)
 
@@ -502,7 +509,10 @@ async def test_a_clip_saved_in_media_is_served_without_the_camera(hass, _cloud) 
     camera = rec_module.find_camera(hass, "BK1")
     begin = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
     end = begin + timedelta(seconds=8)
-    saved = store.root / "BK1_20261110T080000Z_20261110T080008Z_h264.mp4"
+    saved = rec_module._clip_path(
+        store, ("BK1", "20261110T080000Z", "20261110T080008Z", "h264")
+    )
+    saved.parent.mkdir(parents=True)
     saved.write_bytes(b"mp4")
     # The index can miss a file that is on disk: a restored backup, a copied
     # clip, or a store built before the file was written.
@@ -524,7 +534,10 @@ async def test_an_h264_copy_answers_an_hevc_request(hass, _cloud) -> None:
     end = begin + timedelta(seconds=8)
     # "Download latest recording" and the browser asking for HEVC must not store
     # the same recording twice: H.264 plays everywhere.
-    saved = store.root / "BK1_20261110T080000Z_20261110T080008Z_h264.mp4"
+    saved = rec_module._clip_path(
+        store, ("BK1", "20261110T080000Z", "20261110T080008Z", "h264")
+    )
+    saved.parent.mkdir(parents=True)
     saved.write_bytes(b"mp4")
     store.clips.clear()
 
@@ -541,7 +554,10 @@ async def test_an_hevc_only_copy_is_not_used_for_h264(hass, _cloud) -> None:
     camera = rec_module.find_camera(hass, "BK1")
     begin = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
     end = begin + timedelta(seconds=8)
-    hevc = store.root / "BK1_20261110T080000Z_20261110T080008Z_hevc.mp4"
+    hevc = rec_module._clip_path(
+        store, ("BK1", "20261110T080000Z", "20261110T080008Z", "hevc")
+    )
+    hevc.parent.mkdir(parents=True)
     hevc.write_bytes(b"mp4")
     store.clips.clear()
 
@@ -569,7 +585,7 @@ async def test_a_clip_removed_from_media_is_fetched_again(hass, _cloud) -> None:
     begin = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
     end = begin + timedelta(seconds=8)
     key = ("BK1", "20261110T080000Z", "20261110T080008Z", "h264")
-    gone = store.root / "BK1_20261110T080000Z_20261110T080008Z_h264.mp4"
+    gone = rec_module._clip_path(store, key)
     store.clips[key] = gone  # indexed, but the file was deleted by hand
 
     with (
@@ -587,17 +603,23 @@ async def test_a_clip_removed_from_media_is_fetched_again(hass, _cloud) -> None:
     assert path == gone and gone.exists()
 
 
-async def test_downloaded_clips_are_reindexed_after_a_restart(hass, _cloud) -> None:
+async def test_flat_clips_are_migrated_into_day_folders(hass, _cloud) -> None:
     await _setup_with_index(hass, [])
     store = await rec_module.async_get_store(hass)
+    # A clip saved flat by a version without the year/month/day folders.
     clip = store.root / "BK1_20261110T080000Z_20261110T080008Z_h264.mp4"
     clip.write_bytes(b"mp4")
 
-    # A restart forgets the store; the next use rebuilds the index from the folder.
+    # A restart forgets the store; the next use rebuilds the index from the
+    # folder and files the old clip away under its day.
+    key = ("BK1", "20261110T080000Z", "20261110T080008Z", "h264")
     await rec_module.async_close_store(hass)
     assert rec_module.DATA_RECORDINGS not in hass.data
     again = await rec_module.async_get_store(hass)
-    assert again.clips[("BK1", "20261110T080000Z", "20261110T080008Z", "h264")] == clip
+    moved = rec_module._clip_path(again, key)
+    assert not clip.exists()
+    assert moved.exists()
+    assert again.clips[key] == moved
 
 
 async def test_downloaded_clips_are_pruned_by_retention(hass, _cloud) -> None:
@@ -620,6 +642,49 @@ async def test_downloaded_clips_are_pruned_by_retention(hass, _cloud) -> None:
     with patch.object(rec_module, "_keep_days", return_value=0):
         assert await rec_module.async_prune_recordings(hass) == 0
     assert stale.exists()
+
+
+async def test_a_downloaded_clip_is_filed_under_its_local_day(hass, _cloud) -> None:
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    await _setup_with_index(hass, [])
+    camera = rec_module.find_camera(hass, "BK1")
+    # 22:30 UTC is already the next day in Johannesburg (UTC+2).
+    begin = datetime(2026, 11, 10, 22, 30, tzinfo=UTC)
+    end = begin + timedelta(seconds=8)
+
+    with (
+        patch.object(rec_module, "_download_clip", return_value=b"PSDATA"),
+        patch.object(
+            rec_module,
+            "_async_to_mp4",
+            side_effect=lambda _bin, _ps, _fmt, target: target.write_bytes(b"mp4"),
+        ),
+        patch("custom_components.ezviz_rtsp.live.ffmpeg_binary", return_value="ffmpeg"),
+    ):
+        path = await rec_module.async_get_clip(hass, camera, begin, end, "h264")
+
+    assert path == (
+        rec_module.media_root(hass)
+        / "2026/11/11"
+        / "BK1_20261110T223000Z_20261110T223008Z_h264.mp4"
+    )
+    assert path.exists()
+
+
+async def test_retention_removes_empty_day_folders(hass, _cloud) -> None:
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    folder = store.root / "2026/10/01"
+    folder.mkdir(parents=True)
+    stale = folder / "BK1_20261001T080000Z_20261001T080008Z_h264.mp4"
+    stale.write_bytes(b"stale")
+    ten_days_ago = time.time() - 10 * 86400
+    os.utime(stale, (ten_days_ago, ten_days_ago))
+
+    assert await rec_module.async_prune_recordings(hass) == 1
+    assert not stale.exists()
+    # The empty year/month/day folders go with it.
+    assert not (store.root / "2026").exists()
 
 
 async def test_recordings_sweep_is_scheduled_and_stopped(hass, _cloud) -> None:

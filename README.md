@@ -491,10 +491,10 @@ data:
 
 It finds the newest recording of **today** (or **yesterday**, when the camera
 has not recorded anything yet today), downloads it through the EZVIZ cloud and
-saves it as an MP4 under `media/ezviz_rtsp/` — the same place the card keeps its
-clips, so the retention setting applies. The camera is woken, so expect the same
-15–30 seconds as playing a recording in the card, and the same "one viewer at a
-time" rule (stop the live view first).
+saves it as an MP4 under `media/ezviz_rtsp/<year>/<month>/<day>/` — the same
+place the card keeps its clips, so the retention setting applies. The camera is
+woken, so expect the same 15–30 seconds as playing a recording in the card, and
+the same "one viewer at a time" rule (stop the live view first).
 
 Every camera also gets a **Download latest recording** button in its
 **Controls** section, so it can be pressed by hand. Both the service and the
@@ -540,15 +540,18 @@ recording is also readable from the **Media** browser under `ezviz_rtsp`.
   **15–30 seconds** to arrive — most of it the camera waking up, then a few
   seconds of conversion.
 - **Where the clips go.** A fetched recording is saved as an MP4 under Home
-  Assistant's **media** folder, in `media/ezviz_rtsp/`, so seeking and playing it
-  again don't touch the camera. You can browse and download the files from
-  **Media → My media → ezviz_rtsp**, and they survive a restart. A past day's
-  list is kept until you press refresh; today's for a minute.
+  Assistant's **media** folder, filed by the day it was recorded:
+  `media/ezviz_rtsp/<year>/<month>/<day>/`, using Home Assistant's local time.
+  Seeking and playing it again don't touch the camera, and the files survive a
+  restart. Browse and download them from **Media → My media → ezviz_rtsp**,
+  where the years, months and days are the folders. A past day's list is kept
+  until you press refresh; today's for a minute.
 - **How long they stay.** Under **Configure → Downloaded recordings** you choose
   how many days those MP4s are kept (default **7**); older files are deleted,
   the rest left alone. `0` keeps them until you delete them yourself. The folder
   is swept at start-up, once a day while Home Assistant runs, and whenever a new
-  clip is downloaded.
+  clip is downloaded; day folders left empty are removed. Clips saved flat by an
+  older version are moved into their day folders on the next start.
 - **Format.** The camera records **H.265/HEVC**. Safari (and the iOS/macOS
   Home Assistant apps) and most Chrome and Edge builds on Windows and macOS play
   it as is; the integration only repackages it as MP4. Firefox and browsers
@@ -573,8 +576,8 @@ Playback asks the VTM relay — the same relay as the live view — to stream th
 chosen interval from the SD card; the integration collects it as MPEG-PS,
 converts it with ffmpeg to an MP4 with the index at the front, and serves it to
 the card from an authenticated view that supports range requests (seeking).
-The MP4 is kept under `media/ezviz_rtsp/` (see [How long they
-stay](#what-it-costs-and-what-to-expect)), so a second play doesn't wake the
+The MP4 is kept under `media/ezviz_rtsp/<year>/<month>/<day>/` (see [How long
+they stay](#what-it-costs-and-what-to-expect)), so a second play doesn't wake the
 camera again. The card reaches the file through a short-lived signed path,
 handed out by the websocket command that prepared it.
 
