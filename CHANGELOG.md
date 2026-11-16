@@ -35,6 +35,10 @@ This project follows [Semantic Versioning](https://semver.org/).
   (`pyezvizapi.streaming.cloud`; 2.0.0 removed `pyezvizapi.cloud_stream`), and
   every other call the integration makes is unchanged in 2.0.0. Home Assistant
   installs it on the next start.
+- **A Repairs warning for a conflicting `pyezvizapi`.** At start-up the
+  integration names any other enabled integration that pins a `pyezvizapi`
+  version it cannot share (the built-in `ezviz` integration, which pins 1.x, is
+  the usual one), so it is clear which one to ignore or remove.
 
 ## [1.6.0] — 2026-11-07
 

@@ -199,9 +199,9 @@
     }
   },
   "issues": {
-    "builtin_ezviz_enabled": {
-      "title": "The built-in EZVIZ integration is enabled too",
-      "description": "Both **EZVIZ Cloud with Video** and Home Assistant's built-in **EZVIZ** integration are enabled, and they need different versions of the same `pyezvizapi` library. Home Assistant can install only one version, so one of the two may stop working after a restart. Ignore or remove the built-in EZVIZ integration (Settings → Devices & services → EZVIZ → Ignore) and keep only this one."
+    "pyezvizapi_conflict": {
+      "title": "Another integration needs a different pyezvizapi",
+      "description": "{integrations} also uses the `pyezvizapi` package, but needs a version this integration does not have installed. Home Assistant installs one version of a package per environment, so after a restart one of the two may stop working. Ignore or remove that integration, or make sure both accept the same pyezvizapi version."
     }
   },
   "options": {

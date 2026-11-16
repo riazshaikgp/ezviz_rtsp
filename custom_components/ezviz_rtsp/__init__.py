@@ -1,6 +1,7 @@
 """Support for EZVIZ camera."""
 
 import hashlib
+import importlib.metadata
 import logging
 from pathlib import Path
 
@@ -13,7 +14,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
-from homeassistant.loader import async_get_integration
+from homeassistant.loader import IntegrationNotFound, async_get_integration
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.version import Version
 from pyezvizapi.client import EzvizClient
 from pyezvizapi.exceptions import (
     EzvizAuthTokenExpired,
@@ -44,11 +47,12 @@ from .recordings import async_close_store, async_setup_recordings
 
 _LOGGER = logging.getLogger(__name__)
 
-# The built-in integration this one is a fork of. Both share one Python
-# environment, and therefore one pyezvizapi package, but need different major
-# versions of it, so they cannot both be set up at once.
-BUILTIN_EZVIZ_DOMAIN = "ezviz"
-BUILTIN_EZVIZ_ISSUE = "builtin_ezviz_enabled"
+# Every integration shares one Python environment, and therefore one version of
+# each package. This integration needs a 2.x pyezvizapi; another integration that
+# pins a version the installed one does not satisfy makes Home Assistant reinstall
+# a version for whichever integration it processes last.
+PYEZVIZAPI_PACKAGE = "pyezvizapi"
+PYEZVIZAPI_CONFLICT_ISSUE = "pyezvizapi_conflict"
 
 PLATFORMS_BY_TYPE: dict[str, list] = {
     ATTR_TYPE_CAMERA: [],
@@ -99,37 +103,83 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     async_register_commands(hass)
 
 
-def _warn_about_builtin_ezviz(hass: HomeAssistant) -> None:
-    """Raise a Repairs issue while the built-in ``ezviz`` integration is enabled.
+def _installed_pyezvizapi() -> Version | None:
+    """The version of pyezvizapi this Home Assistant actually has installed."""
+    try:
+        return Version(importlib.metadata.version(PYEZVIZAPI_PACKAGE))
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
-    This fork and the built-in integration are two separate integrations, but they
-    share one Python environment and therefore one ``pyezvizapi`` package, and they
-    pin different major versions of it. Home Assistant installs one version per
-    environment, so whenever both are set up it reinstalls a version for whichever
-    one it processed last — and one of them is then left running against the
-    wrong library. The issue tells the user to ignore or remove the built-in one.
+
+def _pyezvizapi_requirement(requirements: list[str]) -> Requirement | None:
+    """The pyezvizapi requirement among an integration's manifest requirements."""
+    for requirement in requirements:
+        try:
+            parsed = Requirement(requirement)
+        except InvalidRequirement:
+            continue
+        if parsed.name == PYEZVIZAPI_PACKAGE:
+            return parsed
+    return None
+
+
+async def _async_warn_about_pyezvizapi_conflicts(hass: HomeAssistant) -> None:
+    """Raise a Repairs issue for any integration that needs a different pyezvizapi.
+
+    Every integration is installed into one Python environment, so only one
+    version of ``pyezvizapi`` can exist. If another enabled integration pins a
+    version the installed one does not satisfy, Home Assistant reinstalls a
+    version for whichever integration it processes last, and the other one may
+    then run against the wrong library. This is not specific to the built-in
+    ``ezviz`` integration: any integration that requires a different version of
+    the package conflicts the same way.
     """
-    enabled = [
-        item
-        for item in hass.config_entries.async_entries(BUILTIN_EZVIZ_DOMAIN)
-        if item.source != SOURCE_IGNORE
-    ]
-    if not enabled:
-        ir.async_delete_issue(hass, DOMAIN, BUILTIN_EZVIZ_ISSUE)
+    installed = _installed_pyezvizapi()
+    if installed is None:
         return
+
+    conflicts: list[str] = []
+    seen: set[str] = set()
+    for entry in hass.config_entries.async_entries():
+        domain = entry.domain
+        # Only entries that will actually be set up can install requirements.
+        if domain == DOMAIN or domain in seen:
+            continue
+        if entry.source == SOURCE_IGNORE or entry.disabled_by is not None:
+            continue
+        seen.add(domain)
+        try:
+            integration = await async_get_integration(hass, domain)
+        except IntegrationNotFound:
+            continue
+        requirement = _pyezvizapi_requirement(
+            integration.manifest.get("requirements") or []
+        )
+        if requirement is None:
+            continue
+        if requirement.specifier.contains(installed, prereleases=True):
+            continue
+        conflicts.append(f"{integration.name} ({requirement})")
+
+    if not conflicts:
+        ir.async_delete_issue(hass, DOMAIN, PYEZVIZAPI_CONFLICT_ISSUE)
+        return
+
+    listed = ", ".join(sorted(conflicts))
     _LOGGER.warning(
-        "The built-in %s integration is enabled and pins a different pyezvizapi "
-        "version; ignore or remove it, or this integration may run against the "
-        "wrong library",
-        BUILTIN_EZVIZ_DOMAIN,
+        "These integrations pin a %s version that is not installed and will "
+        "fight over the shared package: %s",
+        PYEZVIZAPI_PACKAGE,
+        listed,
     )
     ir.async_create_issue(
         hass,
         DOMAIN,
-        BUILTIN_EZVIZ_ISSUE,
+        PYEZVIZAPI_CONFLICT_ISSUE,
         is_fixable=False,
         severity=ir.IssueSeverity.WARNING,
-        translation_key=BUILTIN_EZVIZ_ISSUE,
+        translation_key=PYEZVIZAPI_CONFLICT_ISSUE,
+        translation_placeholders={"integrations": listed},
         learn_more_url="https://github.com/tarasifua/ezviz_rtsp",
     )
 
@@ -185,8 +235,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: EzvizConfigEntry) -> boo
         await _async_register_card(hass)
         # Sweep the downloaded clips now, and once a day while we run.
         await async_setup_recordings(hass)
-        # Warn if the built-in ezviz integration shares the pyezvizapi package.
-        _warn_about_builtin_ezviz(hass)
+        # Warn if another integration needs a different version of pyezvizapi.
+        await _async_warn_about_pyezvizapi_conflicts(hass)
 
     # Check EZVIZ cloud account entity is present, reload
     # cloud account entities for camera entity change

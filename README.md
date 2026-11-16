@@ -35,6 +35,16 @@ It is a fork of the **built-in** EZVIZ integration, so everything that one
 does still works here. It lives under its own domain, `ezviz_rtsp`, which means
 it sits **next to** the built-in one instead of replacing it.
 
+> **One shared library.** This integration and the built-in EZVIZ one are
+> separate integrations, but they use the same Python package, `pyezvizapi`,
+> and Home Assistant can install only one version of it. This one needs
+> `pyezvizapi` 2.x (for SD-card playback), while the built-in one pins 1.x. So
+> **only one of the two can be active**: ignore or remove the built-in EZVIZ
+> integration, and keep this one. The same applies to any other integration
+> that pins a different `pyezvizapi` version — Home Assistant shows a **Repairs**
+> issue naming it when that happens. See
+> [Conflicts with other integrations](#conflicts-with-other-integrations).
+
 ---
 
 ## Put it in Marketplace
@@ -542,6 +552,30 @@ authenticated picture view instead):
 ```
 http://<your-ha>:8123/api/ezviz_rtsp/mjpeg/<serial>?token=<stream token>
 ```
+
+---
+
+## Conflicts with other integrations
+
+This integration needs **`pyezvizapi` 2.x**. Home Assistant installs every
+integration's Python requirements into one environment, so it can hold only one
+version of a package. If another enabled integration pins a `pyezvizapi` version
+that does not include the installed one, Home Assistant reinstalls a version for
+whichever integration it processes last, and the other one may then run against
+the wrong library.
+
+The usual case is the **built-in EZVIZ** integration, which pins `pyezvizapi`
+1.x: ignore or remove it (Settings → Devices & services → EZVIZ → Ignore) and
+keep this one. The same goes for any other integration that requires a different
+version.
+
+This integration looks for such integrations at start-up and, when it finds one,
+shows a **Repairs** issue that names it (Settings → System → Repairs). The issue
+clears once the conflicting integration is ignored or removed.
+
+Two integrations can share the package when their requirements overlap — for
+example, another one that accepts `pyezvizapi>=2`. Only a genuinely different
+version conflicts.
 
 ---
 
