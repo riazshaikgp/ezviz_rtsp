@@ -329,6 +329,97 @@ async def test_websocket_releases_the_live_stream_at_once(
     assert not stream.active
 
 
+async def test_a_clip_saved_in_media_is_served_without_the_camera(hass, _cloud) -> None:
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    camera = rec_module.find_camera(hass, "BK1")
+    begin = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
+    end = begin + timedelta(seconds=8)
+    saved = store.root / "BK1_20261110T080000Z_20261110T080008Z_h264.mp4"
+    saved.write_bytes(b"mp4")
+    # The index can miss a file that is on disk: a restored backup, a copied
+    # clip, or a store built before the file was written.
+    store.clips.clear()
+
+    with patch.object(rec_module, "_download_clip", new=AsyncMock()) as download:
+        path = await rec_module.async_get_clip(hass, camera, begin, end, "h264")
+
+    assert path == saved
+    download.assert_not_called()
+    assert store.clips[("BK1", "20261110T080000Z", "20261110T080008Z", "h264")] == saved
+
+
+async def test_an_h264_copy_answers_an_hevc_request(hass, _cloud) -> None:
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    camera = rec_module.find_camera(hass, "BK1")
+    begin = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
+    end = begin + timedelta(seconds=8)
+    # "Download latest recording" and the browser asking for HEVC must not store
+    # the same recording twice: H.264 plays everywhere.
+    saved = store.root / "BK1_20261110T080000Z_20261110T080008Z_h264.mp4"
+    saved.write_bytes(b"mp4")
+    store.clips.clear()
+
+    with patch.object(rec_module, "_download_clip", new=AsyncMock()) as download:
+        path = await rec_module.async_get_clip(hass, camera, begin, end, "hevc")
+
+    assert path == saved
+    download.assert_not_called()
+
+
+async def test_an_hevc_only_copy_is_not_used_for_h264(hass, _cloud) -> None:
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    camera = rec_module.find_camera(hass, "BK1")
+    begin = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
+    end = begin + timedelta(seconds=8)
+    hevc = store.root / "BK1_20261110T080000Z_20261110T080008Z_hevc.mp4"
+    hevc.write_bytes(b"mp4")
+    store.clips.clear()
+
+    with (
+        patch.object(rec_module, "_download_clip", return_value=b"PSDATA") as download,
+        patch.object(
+            rec_module,
+            "_async_to_mp4",
+            side_effect=lambda _bin, _ps, _fmt, target: target.write_bytes(b"mp4"),
+        ),
+        patch("custom_components.ezviz_rtsp.live.ffmpeg_binary", return_value="ffmpeg"),
+    ):
+        path = await rec_module.async_get_clip(hass, camera, begin, end, "h264")
+
+    # HEVC does not play everywhere, so an H.264 request still needs its copy.
+    download.assert_called_once()
+    assert path.name.endswith("_h264.mp4")
+    assert path.exists() and path != hevc
+
+
+async def test_a_clip_removed_from_media_is_fetched_again(hass, _cloud) -> None:
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    camera = rec_module.find_camera(hass, "BK1")
+    begin = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
+    end = begin + timedelta(seconds=8)
+    key = ("BK1", "20261110T080000Z", "20261110T080008Z", "h264")
+    gone = store.root / "BK1_20261110T080000Z_20261110T080008Z_h264.mp4"
+    store.clips[key] = gone  # indexed, but the file was deleted by hand
+
+    with (
+        patch.object(rec_module, "_download_clip", return_value=b"PSDATA") as download,
+        patch.object(
+            rec_module,
+            "_async_to_mp4",
+            side_effect=lambda _bin, _ps, _fmt, target: target.write_bytes(b"mp4"),
+        ),
+        patch("custom_components.ezviz_rtsp.live.ffmpeg_binary", return_value="ffmpeg"),
+    ):
+        path = await rec_module.async_get_clip(hass, camera, begin, end, "h264")
+
+    download.assert_called_once()
+    assert path == gone and gone.exists()
+
+
 async def test_downloaded_clips_are_reindexed_after_a_restart(hass, _cloud) -> None:
     await _setup_with_index(hass, [])
     store = await rec_module.async_get_store(hass)

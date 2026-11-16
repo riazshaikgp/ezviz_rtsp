@@ -156,6 +156,25 @@ def _prepare_store(root: Path) -> RecordingStore:
     return store
 
 
+def _saved_clip(store: RecordingStore, key: tuple[str, str, str, str]) -> Path | None:
+    """A copy of the recording already in the media folder. Blocking.
+
+    The requested format wins. An H.264 copy also answers an HEVC request:
+    H.264 plays in every browser, so fetching or converting the same recording
+    again would only wake the camera and read its SD card for nothing. The
+    reverse is not done — an HEVC file does not play everywhere.
+    """
+    serial, begin, end, fmt = key
+    path = store.root / f"{serial}_{begin}_{end}_{fmt}.mp4"
+    if path.is_file():
+        return path
+    if fmt == "hevc":
+        fallback = store.root / f"{serial}_{begin}_{end}_h264.mp4"
+        if fallback.is_file():
+            return fallback
+    return None
+
+
 async def async_get_store(hass: HomeAssistant) -> RecordingStore:
     """The recording store, made on first use over Home Assistant's media folder.
 
@@ -549,6 +568,16 @@ async def async_get_clip(
     store = await async_get_store(hass)
     key = (camera.serial, utc_stamp(begin), utc_stamp(end), fmt)
     if (path := store.clips.get(key)) is not None:
+        if await hass.async_add_executor_job(path.is_file):
+            store.clips.move_to_end(key)
+            return path
+        # Removed outside the integration (by hand, or by another tool).
+        store.clips.pop(key, None)
+    # The media folder is the source of truth: a clip saved earlier is served
+    # again without touching the camera, even when the in-memory index missed it
+    # (a restored backup, a copied file, or an index built before it was written).
+    if (path := await hass.async_add_executor_job(_saved_clip, store, key)) is not None:
+        store.clips[key] = path
         store.clips.move_to_end(key)
         return path
     if (pending := store.pending.get(key)) is not None:

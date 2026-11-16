@@ -49,6 +49,13 @@ This project follows [Semantic Versioning](https://semver.org/).
   view first"). The card now releases the session through a new
   `ezviz_rtsp/live/stop` websocket command as soon as the recordings view opens
   (and again before each clip), so playback starts immediately.
+- **A recording already in the media folder is never downloaded twice.** The
+  clip lookup now checks the folder itself, not only the in-memory index, so a
+  file saved earlier is played straight from `media/ezviz_rtsp/` even after a
+  restart, a restored backup or a copy made by hand; a stale index entry whose
+  file was deleted is dropped and fetched again. An **H.264** copy also answers
+  an HEVC request (H.264 plays everywhere), so the same recording is not stored
+  twice just because another browser or the download service asked for it.
 
 ### Changed
 - Requires **pyezvizapi 2.5.1** (was 1.0.5.0). 2.0.0 added SD playback through

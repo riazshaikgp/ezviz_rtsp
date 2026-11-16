@@ -423,6 +423,12 @@ max_height: 360                # optional; height of the list in pixels
   controls (pause, seek, full screen). Tap another to switch, or close the
   player with ✕. The card shows "Fetching the recording from the camera…"
   while the clip is on its way.
+- **A recording already saved in the media folder is never fetched again.** It
+  plays straight from `media/ezviz_rtsp/`, without waking the camera — the media
+  folder is checked even when the in-memory index missed a file (a restored
+  backup, a copy made by hand). An **H.264** copy also answers a request for
+  HEVC, since H.264 plays in every browser; the other way round is not done,
+  because HEVC does not.
 - The list is read the first time the card is on screen, not when a dashboard
   merely contains it; a card that leaves the screen pauses its player.
 
