@@ -412,7 +412,8 @@ day of a camera's recordings and plays the one you tap, right in the card.
 - **Tap a recording to play it** in the card's player, with the usual video
   controls (pause, seek, full screen). Tap another to switch, or close the
   player with ✕. The card shows "Fetching the recording from the camera…"
-  while the clip is on its way.
+  while the clip is on its way, and the list stays at the row you tapped
+  instead of jumping back to the top.
 - **A recording already saved in the media folder is never fetched again** —
   unless its file is clearly shorter than the interval in its name, which means
   the download was cut off; then the card fetches it once more. It otherwise

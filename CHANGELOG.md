@@ -86,6 +86,10 @@ This project follows [Semantic Versioning](https://semver.org/).
   written beside their target and moved into place, so a half-written MP4 is
   never served. The row's length also follows the file once it plays, with the
   listed length in its tooltip when they differ.
+- **The recordings list no longer jumps to the top.** Picking a clip near the
+  bottom of the list used to re-render the card and scroll the list back to the
+  first recording while the clip was fetched and played. The list now keeps its
+  position; the ⟳ button and a day change still start at the top.
 - **A camera busy with another viewer (EZVIZ 5405) gets a few seconds.** Playback
   is retried twice, two seconds apart, before the card shows the error — enough
   for the relay to release a live session the card just stopped. The message now

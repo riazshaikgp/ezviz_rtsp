@@ -432,6 +432,8 @@ class EzvizVideoCard extends HTMLElement {
     this._listError = "";
     this._listGen = 0;
     this._listAt = 0; // when the list was last read (for today's freshness)
+    this._listScroll = 0; // where the recordings list was scrolled to
+    this._listScrollReset = false; // a day change or refresh starts at the top
     this._selected = null; // the recording in the media area
     this._clipState = "idle"; // idle | fetching | playing | error
     this._clipError = "";
@@ -475,6 +477,8 @@ class EzvizVideoCard extends HTMLElement {
       this._closeClip();
       this._list = null;
       this._listAt = 0;
+      this._listScroll = 0;
+      this._listScrollReset = true;
       this._day = null;
       this._today = null;
       this._listError = "";
@@ -872,6 +876,17 @@ class EzvizVideoCard extends HTMLElement {
     const root = this.shadowRoot;
     if (!root) return;
 
+    // Rebuilding the card replaces the list, which would otherwise bounce it to
+    // the top: a clip tapped near the bottom must stay where it was while it is
+    // fetched and played.
+    const oldList = this._recordings ? root.querySelector(".recList") : null;
+    if (this._listScrollReset) {
+      this._listScroll = 0;
+      this._listScrollReset = false;
+    } else if (oldList) {
+      this._listScroll = oldList.scrollTop;
+    }
+
     const card = document.createElement("ha-card");
     const wrap = document.createElement("div");
     wrap.className = "wrap";
@@ -970,6 +985,10 @@ class EzvizVideoCard extends HTMLElement {
     if (this._recordings) wrap.append(this._recordingsView());
     card.appendChild(wrap);
     root.replaceChildren(createStyle(style), card);
+    if (this._recordings) {
+      const list = root.querySelector(".recList");
+      if (list) list.scrollTop = this._listScroll;
+    }
     this._header = { tile, primary, secondary, dot, status, battery };
     this._syncBattery();
   }
@@ -1148,6 +1167,8 @@ class EzvizVideoCard extends HTMLElement {
     if (!this._recordings || !this._hass) return;
     // The list is cached while the card lives; the refresh button re-reads it.
     if (this._list && !refresh) return;
+    // The ⟳ button is above the list: a fresh read starts at the top.
+    if (refresh) this._listScrollReset = true;
     await this._loadDevices();
     if (!this._recordings) return;
     const serial = this._serial();
@@ -1190,6 +1211,7 @@ class EzvizVideoCard extends HTMLElement {
     if (this._selected) this._closeClip();
     this._day = next;
     this._list = null;
+    this._listScrollReset = true; // another day: start its list at the top
     this._loadRecordings();
   }
 
