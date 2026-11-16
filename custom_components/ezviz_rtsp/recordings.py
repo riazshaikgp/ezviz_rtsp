@@ -87,7 +87,7 @@ CLIP_TRANSFER_GRACE = 60.0
 CLIP_IDLE = 10.0
 # A clip shorter than this many seconds of the interval on the card is not the
 # whole recording: fetch it once more before serving it.
-CLIP_SHORTFALL = 1.5
+CLIP_SHORTFALL = 2.5
 CLIP_TRANSFER_ATTEMPTS = 2
 # The socket's own timeout must outlast a camera waking up.
 CLIP_SOCKET_TIMEOUT = 30.0
@@ -171,6 +171,12 @@ DATA_DAYS_LOCK = f"{DOMAIN}_recording_days_lock"
 DATA_DAYS_STORE = f"{DOMAIN}_recording_days_store"
 DAYS_STORAGE_KEY = f"{DOMAIN}.recording_days"
 DAYS_STORAGE_VERSION = 1
+# Clips the camera itself sent short, so a restart does not fetch them again.
+DATA_SHORT = f"{DOMAIN}_short_clips"
+DATA_SHORT_LOCK = f"{DOMAIN}_short_clips_lock"
+DATA_SHORT_STORE = f"{DOMAIN}_short_clips_store"
+SHORT_STORAGE_KEY = f"{DOMAIN}.short_clips"
+SHORT_STORAGE_VERSION = 1
 # How often the downloaded clips are swept on top of the start-up sweep.
 PRUNE_INTERVAL = timedelta(days=1)
 
@@ -377,7 +383,16 @@ def _clip_is_short(path: Path, key: tuple[str, str, str, str]) -> bool:
     if seconds is None:
         return False
     wanted = (parse_stamp(key[2]) - parse_stamp(key[1])).total_seconds()
-    return _short_by(seconds, wanted) > 0
+    missing = _short_by(seconds, wanted)
+    if missing:
+        _LOGGER.debug(
+            "Clip %s holds %.1f s of its %.1f s interval (short by %.1f s)",
+            path.name,
+            seconds,
+            wanted,
+            missing,
+        )
+    return missing > 0
 
 
 def _remove_quietly(path: Path) -> None:
@@ -395,6 +410,41 @@ def _replace_clip(part: Path, target: Path) -> None:
         raise
 
 
+async def _short_cache(hass: HomeAssistant) -> tuple[dict[str, Any], Store]:
+    """The clips the camera sent short, loaded from Home Assistant's storage once."""
+    if (data := hass.data.get(DATA_SHORT)) is not None:
+        return data, hass.data[DATA_SHORT_STORE]
+    lock: asyncio.Lock = hass.data.setdefault(DATA_SHORT_LOCK, asyncio.Lock())
+    async with lock:
+        if (data := hass.data.get(DATA_SHORT)) is not None:
+            return data, hass.data[DATA_SHORT_STORE]
+        storage: Store = Store(hass, SHORT_STORAGE_VERSION, SHORT_STORAGE_KEY)
+        data = await storage.async_load() or {}
+        hass.data[DATA_SHORT] = data
+        hass.data[DATA_SHORT_STORE] = storage
+        return data, storage
+
+
+async def _load_short(hass: HomeAssistant, store: RecordingStore) -> None:
+    """Restore the short markers so a restart does not fetch those clips again."""
+    data, _ = await _short_cache(hass)
+    for row in data.get("clips", []):
+        if not isinstance(row, (list, tuple)) or len(row) != 4:
+            continue
+        key = (str(row[0]), str(row[1]), str(row[2]), str(row[3]))
+        if key in store.clips:
+            store.short.add(key)
+
+
+async def _save_short(hass: HomeAssistant, store: RecordingStore) -> None:
+    """Remember the short markers; a marker of a deleted file is dropped."""
+    data, storage = await _short_cache(hass)
+    keys = sorted(key for key in store.short if key in store.clips)
+    async with hass.data[DATA_SHORT_LOCK]:
+        data["clips"] = [list(key) for key in keys]
+        await storage.async_save(data)
+
+
 async def async_get_store(hass: HomeAssistant) -> RecordingStore:
     """The recording store, made on first use over Home Assistant's media folder.
 
@@ -410,6 +460,7 @@ async def async_get_store(hass: HomeAssistant) -> RecordingStore:
         store = await hass.async_add_executor_job(
             _prepare_store, media_root(hass), ZoneInfo(hass.config.time_zone)
         )
+        await _load_short(hass, store)
         hass.data[DATA_RECORDINGS] = store
         return store
 
@@ -498,6 +549,8 @@ async def async_close_store(hass: HomeAssistant) -> None:
     """Forget the in-memory lists and stop the sweep; the clips stay in the media folder."""
     hass.data.pop(DATA_RECORDINGS, None)
     hass.data.pop(DATA_RECORDINGS_LOCK, None)
+    hass.data.pop(DATA_SHORT, None)
+    hass.data.pop(DATA_SHORT_STORE, None)
     if (unsub := hass.data.pop(DATA_RECORDINGS_TIMER, None)) is not None:
         unsub()
 
@@ -1478,14 +1531,16 @@ async def _async_fetch(
             # every play.
             if await hass.async_add_executor_job(_clip_is_short, target, key):
                 store.short.add(key)
+                await _save_short(hass, store)
                 _LOGGER.debug(
                     "Recording %s %s-%s is still shorter than its interval; keeping it",
                     serial,
                     begin,
                     end,
                 )
-            else:
+            elif key in store.short:
                 store.short.discard(key)
+                await _save_short(hass, store)
             # Clips are kept until the retention setting ages them out; a download is
             # a good moment to sweep, since the folder is on disk anyway.
             await async_prune_recordings(hass)

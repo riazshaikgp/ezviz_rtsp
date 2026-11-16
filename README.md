@@ -734,9 +734,12 @@ integration already asked twice. Press refresh — it is usually awake by then.
 
 The length in the list comes from the camera's SD index. A file saved by an
 older version may have been cut off by the fixed transfer window: the card reads
-the MP4's real duration, and if it is clearly shorter than the interval, fetches
-the recording again automatically (once; a clip the camera itself sends short is
-kept as it is and not fetched on every play). Such a row shows an orange alert
+the MP4's real duration, and if it is clearly shorter than the interval (more
+than about two and a half seconds, or 5% of a long clip, which covers the camera
+closing an event file a little early), fetches the recording again
+automatically. A clip the camera itself sends short is kept as it is, and that
+verdict is remembered in Home Assistant's `.storage`, so a restart does not
+fetch it again. Such a row shows an orange alert
 cloud, and while it is fetched again the card says **"The saved recording is
 incomplete — downloading it again…"**. The transfer window now grows with the
 recording, so a long clip is not cut off while it is still arriving. Once a

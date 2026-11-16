@@ -134,6 +134,16 @@ This project follows [Semantic Versioning](https://semver.org/).
   reading its SD card." instead of an empty day. It is now read as an empty
   result, so today's list simply says there are no recordings yet (and the
   calendar month scan also treats such a day as empty).
+- **A recording the camera itself sends short is not fetched again after a
+  restart.** The "is this saved file shorter than its interval?" check is a
+  heuristic, and its verdict for a short clip was only kept in memory: every
+  restart brought the orange alert cloud back and fetched the clip once more,
+  forever. The verdict is now saved in Home Assistant's `.storage`
+  (`ezviz_rtsp.short_clips`) and restored with the media index; a marker is
+  dropped when its file is gone. The tolerance also grew to 2.5 s (or 5% of a
+  long clip), because the camera often closes an event file one or two seconds
+  early — a 12-second event arriving as 11 s of video is no longer treated as a
+  cut-off download.
 
 ### Changed
 - Requires **pyezvizapi 2.5.1** (was 1.0.5.0). 2.0.0 added SD playback through

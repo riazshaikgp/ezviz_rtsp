@@ -909,6 +909,8 @@ def test_a_fraction_short_is_not_a_shortfall() -> None:
     # The camera often closes the file a fraction early; that is not a retry.
     assert rec_module._short_by(11.4, 12) == 0
     assert rec_module._short_by(118, 120) == 0
+    # A 12-second event often arrives as 11 s of file: still the whole recording.
+    assert rec_module._short_by(10.6, 12.9) == 0
     # A real gap is.
     assert rec_module._short_by(9.0, 12) > 0
     assert rec_module._short_by(100, 120) > 0
@@ -921,6 +923,62 @@ def test_mp4_duration_is_read_from_the_movie_header(tmp_path) -> None:
 
     (tmp_path / "bad.mp4").write_bytes(b"not an mp4 at all")
     assert rec_module._mp4_seconds(tmp_path / "bad.mp4") is None
+
+
+async def test_a_short_clip_is_not_fetched_again_after_a_restart(
+    hass, _cloud, hass_storage
+) -> None:
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    camera = rec_module.find_camera(hass, "BK1")
+    begin = datetime(2026, 11, 16, 18, 49, 6, tzinfo=UTC)
+    end = begin + timedelta(seconds=13)
+    key = ("BK1", "20261116T184906Z", "20261116T184919Z", "h264")
+    saved = rec_module._clip_path(store, key)
+    saved.parent.mkdir(parents=True)
+    # The camera sent 10.6 s of the 13 s interval: it is short, but fetching
+    # it again proves the same thing, so the verdict has to survive a restart.
+    saved.write_bytes(_mp4_bytes(10.6))
+    store.clips[key] = saved
+    store.short.add(key)
+    await rec_module._save_short(hass, store)
+    assert "ezviz_rtsp.short_clips" in hass_storage
+
+    # A restart rebuilds the index from the media folder.
+    hass.data.pop(rec_module.DATA_RECORDINGS)
+    hass.data.pop(rec_module.DATA_SHORT)
+    hass.data.pop(rec_module.DATA_SHORT_STORE)
+    again = await rec_module.async_get_store(hass)
+    assert key in again.short
+
+    with patch.object(rec_module, "_download_clip", new=AsyncMock()) as download:
+        path = await rec_module.async_get_clip(hass, camera, begin, end, "h264")
+
+    download.assert_not_called()
+    assert path == saved
+
+
+async def test_a_short_marker_is_dropped_with_its_file(hass, _cloud, hass_storage) -> None:
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    key = ("BK1", "20261116T184906Z", "20261116T184919Z", "h264")
+    saved = rec_module._clip_path(store, key)
+    saved.parent.mkdir(parents=True)
+    saved.write_bytes(_mp4_bytes(10.6))
+    store.clips[key] = saved
+    store.short.add(key)
+    await rec_module._save_short(hass, store)
+
+    # Retention or a hand delete removes the clip: the marker goes with it.
+    store.clips.pop(key)
+    await rec_module._save_short(hass, store)
+    assert hass_storage["ezviz_rtsp.short_clips"]["data"]["clips"] == []
+
+    hass.data.pop(rec_module.DATA_RECORDINGS)
+    hass.data.pop(rec_module.DATA_SHORT)
+    hass.data.pop(rec_module.DATA_SHORT_STORE)
+    again = await rec_module.async_get_store(hass)
+    assert key not in again.short
 
 
 async def test_a_cached_clip_shorter_than_its_interval_is_fetched_again(
@@ -967,7 +1025,7 @@ async def test_a_recording_the_camera_sends_short_is_kept_and_served(
     saved = rec_module._clip_path(store, key)
 
     async def short_mp4(_bin, _ps, _fmt, target):
-        target.write_bytes(_mp4_bytes(6))  # the camera itself sends 6 of 8 s
+        target.write_bytes(_mp4_bytes(4))  # the camera itself sends 4 of 8 s
 
     with (
         patch.object(rec_module, "_download_clip", return_value=b"PSDATA"),
