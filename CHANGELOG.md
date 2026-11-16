@@ -20,8 +20,8 @@ This project follows [Semantic Versioning](https://semver.org/).
   [Recordings on the SD card](README.md#recordings-on-the-sd-card).
 - **A retention setting for downloaded recordings.** Under **Configure →
   Downloaded recordings** you choose how many days those MP4s are kept
-  (default 7, `0` keeps them). Older files are swept at start-up and whenever a
-  new clip is downloaded.
+  (default 7, `0` keeps them). Older files are swept at start-up, once a day
+  while Home Assistant runs, and whenever a new clip is downloaded.
 - **The latest recording on demand.** The **Download latest recording** button
   and the `ezviz_rtsp.download_recording` service fetch a camera's newest SD-card
   recording (today, or yesterday when today has none) into the media folder —

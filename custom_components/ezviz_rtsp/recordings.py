@@ -40,6 +40,7 @@ from aiohttp import web
 from homeassistant.const import CONF_TYPE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.http import KEY_HASS, HomeAssistantView
 
 from .const import (
@@ -113,6 +114,10 @@ class RecordingStore:
 
 
 DATA_RECORDINGS = f"{DOMAIN}_recordings"
+DATA_RECORDINGS_LOCK = f"{DOMAIN}_recordings_lock"
+DATA_RECORDINGS_TIMER = f"{DOMAIN}_recordings_timer"
+# How often the downloaded clips are swept on top of the start-up sweep.
+PRUNE_INTERVAL = timedelta(days=1)
 
 
 def media_root(hass: HomeAssistant) -> Path:
@@ -132,32 +137,40 @@ def _key_from_name(name: str) -> tuple[str, str, str, str] | None:
     return parts[0], parts[1], parts[2], parts[3]
 
 
-def _index_clips(store: RecordingStore) -> None:
-    """Fill the clip index from the MP4s already in the media folder.
+def _prepare_store(root: Path) -> RecordingStore:
+    """Make the media folder and index the MP4s already in it. Blocking.
 
-    Runs on the first use after a restart, so a clip downloaded earlier is
-    served again without waking the camera.
+    Runs in the executor: the folder can hold thousands of clips after a long
+    retention, so neither the mkdir nor the glob may run in the event loop.
     """
+    root.mkdir(parents=True, exist_ok=True)
+    store = RecordingStore(root)
     try:
-        files = sorted(store.root.glob("*.mp4"), key=lambda path: path.stat().st_mtime)
+        files = sorted(root.glob("*.mp4"), key=lambda path: path.stat().st_mtime)
     except OSError:
-        return
+        return store
     for path in files:
         key = _key_from_name(path.name)
         if key is not None:
             store.clips[key] = path
-
-
-def get_store(hass: HomeAssistant) -> RecordingStore:
-    """The recording store, made on first use over Home Assistant's media folder."""
-    store: RecordingStore | None = hass.data.get(DATA_RECORDINGS)
-    if store is None:
-        root = media_root(hass)
-        root.mkdir(parents=True, exist_ok=True)
-        store = RecordingStore(root)
-        _index_clips(store)
-        hass.data[DATA_RECORDINGS] = store
     return store
+
+
+async def async_get_store(hass: HomeAssistant) -> RecordingStore:
+    """The recording store, made on first use over Home Assistant's media folder.
+
+    The folder is created and indexed in the executor, once; concurrent callers
+    share the one store through a lock.
+    """
+    if (store := hass.data.get(DATA_RECORDINGS)) is not None:
+        return store
+    lock: asyncio.Lock = hass.data.setdefault(DATA_RECORDINGS_LOCK, asyncio.Lock())
+    async with lock:
+        if (store := hass.data.get(DATA_RECORDINGS)) is not None:
+            return store
+        store = await hass.async_add_executor_job(_prepare_store, media_root(hass))
+        hass.data[DATA_RECORDINGS] = store
+        return store
 
 
 def _keep_days(hass: HomeAssistant) -> int:
@@ -193,7 +206,7 @@ def _prune(root: Path, keep_days: int) -> list[str]:
 
 async def async_prune_recordings(hass: HomeAssistant) -> int:
     """Drop the downloaded clips past their retention; returns how many went."""
-    store = get_store(hass)
+    store = await async_get_store(hass)
     removed = await hass.async_add_executor_job(_prune, store.root, _keep_days(hass))
     for name in removed:
         key = _key_from_name(name)
@@ -202,9 +215,31 @@ async def async_prune_recordings(hass: HomeAssistant) -> int:
     return len(removed)
 
 
+async def async_setup_recordings(hass: HomeAssistant) -> None:
+    """Sweep the clips now, then once a day for as long as Home Assistant runs.
+
+    Without the timer, retention would only be applied at start-up and when a new
+    clip is downloaded, so a long-running instance could hold old files forever.
+    """
+    await async_prune_recordings(hass)
+    if DATA_RECORDINGS_TIMER in hass.data:
+        return
+
+    async def _sweep(_now: datetime) -> None:
+        if removed := await async_prune_recordings(hass):
+            _LOGGER.debug("Pruned %d recording(s) past their retention", removed)
+
+    hass.data[DATA_RECORDINGS_TIMER] = async_track_time_interval(
+        hass, _sweep, PRUNE_INTERVAL
+    )
+
+
 async def async_close_store(hass: HomeAssistant) -> None:
-    """Forget the in-memory lists; the downloaded clips stay in the media folder."""
+    """Forget the in-memory lists and stop the sweep; the clips stay in the media folder."""
     hass.data.pop(DATA_RECORDINGS, None)
+    hass.data.pop(DATA_RECORDINGS_LOCK, None)
+    if (unsub := hass.data.pop(DATA_RECORDINGS_TIMER, None)) is not None:
+        unsub()
 
 
 # -- finding a camera ------------------------------------------------------------
@@ -342,7 +377,7 @@ async def async_list_day(
     hass: HomeAssistant, camera: Camera, day: date, *, refresh: bool = False
 ) -> tuple[list[tuple[datetime, datetime]], bool]:
     """A local day's recordings, from the cache unless stale or ``refresh``."""
-    store = get_store(hass)
+    store = await async_get_store(hass)
     tz = ZoneInfo(hass.config.time_zone)
     now = datetime.now(tz)
     key = (camera.serial, day)
@@ -511,7 +546,7 @@ async def async_get_clip(
         raise RecordingError("A recording must end after it begins")
     if (end - begin).total_seconds() > MAX_CLIP_SECONDS:
         raise RecordingError("The recording is too long to play here")
-    store = get_store(hass)
+    store = await async_get_store(hass)
     key = (camera.serial, utc_stamp(begin), utc_stamp(end), fmt)
     if (path := store.clips.get(key)) is not None:
         store.clips.move_to_end(key)
@@ -632,7 +667,8 @@ class RecordingClipView(HomeAssistantView):
     ) -> web.StreamResponse:
         """The clip's file, or 404 once retention has removed it."""
         hass = request.app[KEY_HASS]
-        path = get_store(hass).clips.get((serial, begin, end, fmt))
+        store = await async_get_store(hass)
+        path = store.clips.get((serial, begin, end, fmt))
         if path is None or not path.is_file():
             raise web.HTTPNotFound
         return web.FileResponse(

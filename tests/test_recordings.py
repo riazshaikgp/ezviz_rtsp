@@ -15,7 +15,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
+from homeassistant.util import dt as dt_util
 from pyezvizapi.exceptions import PyEzvizError
+from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.ezviz_rtsp import recordings as rec_module
 from custom_components.ezviz_rtsp.const import DOMAIN, SIGNAL_RECORDING_DOWNLOADED
@@ -275,7 +277,7 @@ async def test_websocket_lists_a_day_and_hands_out_a_clip(
     assert (await ws.receive_json())["error"]["code"] == "recording_failed"
 
     # The clip lives under the media folder and survives an unload.
-    root = rec_module.get_store(hass).root
+    root = (await rec_module.async_get_store(hass)).root
     clip_file = root / f"BK1_{newest['begin']}_{newest['end']}_hevc.mp4"
     assert root == rec_module.media_root(hass)
     assert clip_file.exists()
@@ -301,20 +303,20 @@ async def test_clip_refused_while_the_camera_streams_live(hass, _cloud) -> None:
 
 async def test_downloaded_clips_are_reindexed_after_a_restart(hass, _cloud) -> None:
     await _setup_with_index(hass, [])
-    store = rec_module.get_store(hass)
+    store = await rec_module.async_get_store(hass)
     clip = store.root / "BK1_20261110T080000Z_20261110T080008Z_h264.mp4"
     clip.write_bytes(b"mp4")
 
     # A restart forgets the store; the next use rebuilds the index from the folder.
     await rec_module.async_close_store(hass)
     assert rec_module.DATA_RECORDINGS not in hass.data
-    again = rec_module.get_store(hass)
+    again = await rec_module.async_get_store(hass)
     assert again.clips[("BK1", "20261110T080000Z", "20261110T080008Z", "h264")] == clip
 
 
 async def test_downloaded_clips_are_pruned_by_retention(hass, _cloud) -> None:
     await _setup_with_index(hass, [])
-    store = rec_module.get_store(hass)
+    store = await rec_module.async_get_store(hass)
     fresh = store.root / "BK1_20261110T080000Z_20261110T080008Z_h264.mp4"
     stale = store.root / "BK1_20261101T080000Z_20261101T080008Z_h264.mp4"
     fresh.write_bytes(b"fresh")
@@ -332,6 +334,30 @@ async def test_downloaded_clips_are_pruned_by_retention(hass, _cloud) -> None:
     with patch.object(rec_module, "_keep_days", return_value=0):
         assert await rec_module.async_prune_recordings(hass) == 0
     assert stale.exists()
+
+
+async def test_recordings_sweep_is_scheduled_and_stopped(hass, _cloud) -> None:
+    entry, _ = await _setup_with_index(hass, [])
+    assert rec_module.DATA_RECORDINGS_TIMER in hass.data
+    # The last account unloading stops the daily sweep.
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert rec_module.DATA_RECORDINGS_TIMER not in hass.data
+
+
+async def test_daily_sweep_prunes_old_clips(hass, _cloud) -> None:
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    stale = store.root / "BK1_20261101T080000Z_20261101T080008Z_h264.mp4"
+    stale.write_bytes(b"stale")
+    ten_days_ago = time.time() - 10 * 86400
+    os.utime(stale, (ten_days_ago, ten_days_ago))
+
+    # A day later the timer fires and sweeps the clip that has aged out.
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(days=1))
+    await hass.async_block_till_done()
+
+    assert not stale.exists()
 
 
 # -- the latest recording: service, button and sensor ----------------------------

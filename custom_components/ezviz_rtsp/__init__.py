@@ -38,7 +38,7 @@ from .const import (
 )
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
 from .live import async_close_live_streams, async_setup_live_streams
-from .recordings import async_close_store, async_prune_recordings
+from .recordings import async_close_store, async_setup_recordings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -140,8 +140,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: EzvizConfigEntry) -> boo
         async_setup_live_streams(hass, entry, coordinator)
         # Ship the card that plays those streams.
         await _async_register_card(hass)
-        # Sweep any downloaded clips that have outlived the retention setting.
-        await async_prune_recordings(hass)
+        # Sweep the downloaded clips now, and once a day while we run.
+        await async_setup_recordings(hass)
 
     # Check EZVIZ cloud account entity is present, reload
     # cloud account entities for camera entity change
