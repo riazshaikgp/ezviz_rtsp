@@ -13,7 +13,9 @@ EZVIZ cloud can do two things with that card the mobile app relies on:
   rest. Finished clips are kept as MP4 files under Home Assistant's media
   folder, so seeking (HTTP range requests) and a second play don't wake the
   camera again, and they survive a restart until the retention setting (how
-  many days to keep) removes the ones that have aged out.
+  many days to keep) removes the ones that have aged out. When the card has
+  saving off, the clip goes to a temporary folder instead and is deleted after
+  a couple of hours, so it never shows under Media.
 
 Both go through the camera: a sleeping battery camera is woken for a replay, so
 the card only ever fetches a clip when someone taps it.
@@ -26,6 +28,7 @@ import base64
 import contextlib
 import json
 import logging
+import tempfile
 import time
 import zlib
 from collections import OrderedDict
@@ -80,6 +83,9 @@ CLIP_MAX_BYTES = 96 * 1024 * 1024
 # A recording longer than this is not a clip; refuse it rather than stream an hour.
 MAX_CLIP_SECONDS = 15 * 60
 _FFMPEG_TIMEOUT = 120
+# A clip watched with "save watched recordings" off lives this long in the
+# temporary folder before the sweep removes it (the signed address lives an hour).
+TEMP_CLIP_SECONDS = 2 * 3600
 
 FORMATS = ("hevc", "h264")
 
@@ -104,6 +110,12 @@ class RecordingStore:
     root: Path
     days: dict[tuple[str, date], _Day] = field(default_factory=dict)
     clips: OrderedDict[tuple[str, str, str, str], Path] = field(default_factory=OrderedDict)
+    # Clips watched with saving off: files in the temp folder, never indexed in
+    # ``clips`` and never listed as local.
+    temp: dict[tuple[str, str, str, str], Path] = field(default_factory=dict)
+    temp_pending: dict[tuple[str, str, str, str], asyncio.Future[Path]] = field(
+        default_factory=dict
+    )
     pending: dict[tuple[str, str, str, str], asyncio.Future[Path]] = field(default_factory=dict)
     # One SD request per camera at a time: EZVIZ refuses parallel sessions.
     locks: dict[str, asyncio.Lock] = field(default_factory=dict)
@@ -175,6 +187,46 @@ def _saved_clip(store: RecordingStore, key: tuple[str, str, str, str]) -> Path |
     return None
 
 
+def temp_root(hass: HomeAssistant) -> Path:
+    """The folder that holds clips watched with "save watched recordings" off."""
+    return Path(tempfile.gettempdir()) / DOMAIN
+
+
+def _sweep_temp(root: Path) -> None:
+    """Remove temp clips older than their short life. Blocking; never fails."""
+    cutoff = time.time() - TEMP_CLIP_SECONDS
+    try:
+        files = list(root.glob("*.mp4"))
+    except OSError:
+        return
+    for path in files:
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+        except OSError:
+            pass
+
+
+def _prepare_temp_root(root: Path) -> Path:
+    """Make the temp folder, drop what has aged out, and return it. Blocking."""
+    root.mkdir(parents=True, exist_ok=True)
+    _sweep_temp(root)
+    return root
+
+
+def _saved_temp(root: Path, key: tuple[str, str, str, str]) -> Path | None:
+    """A temp copy of the recording from a play in the last couple of hours."""
+    serial, begin, end, fmt = key
+    path = root / f"{serial}_{begin}_{end}_{fmt}.mp4"
+    if path.is_file():
+        return path
+    if fmt == "hevc":
+        fallback = root / f"{serial}_{begin}_{end}_h264.mp4"
+        if fallback.is_file():
+            return fallback
+    return None
+
+
 async def async_get_store(hass: HomeAssistant) -> RecordingStore:
     """The recording store, made on first use over Home Assistant's media folder.
 
@@ -231,6 +283,8 @@ async def async_prune_recordings(hass: HomeAssistant) -> int:
         key = _key_from_name(name)
         if key is not None:
             store.clips.pop(key, None)
+    # Clips watched with saving off are only kept for a couple of hours.
+    await hass.async_add_executor_job(_sweep_temp, temp_root(hass))
     return len(removed)
 
 
@@ -555,18 +609,20 @@ async def _async_to_mp4(ffmpeg_bin: str, ps: bytes, fmt: str, target: Path) -> N
         )
 
 
-async def async_get_clip(
-    hass: HomeAssistant, camera: Camera, begin: datetime, end: datetime, fmt: str
-) -> Path:
-    """The MP4 of one recording, from the cache or fetched from the camera now."""
+def _validate_clip(begin: datetime, end: datetime, fmt: str) -> None:
+    """Refuse what cannot or should not be played, before waking the camera."""
     if fmt not in FORMATS:
         raise RecordingError(f"Unknown format {fmt!r}")
     if end <= begin:
         raise RecordingError("A recording must end after it begins")
     if (end - begin).total_seconds() > MAX_CLIP_SECONDS:
         raise RecordingError("The recording is too long to play here")
-    store = await async_get_store(hass)
-    key = (camera.serial, utc_stamp(begin), utc_stamp(end), fmt)
+
+
+async def _lookup_clip(
+    hass: HomeAssistant, store: RecordingStore, key: tuple[str, str, str, str]
+) -> Path | None:
+    """The clip from the in-memory index or the media folder, if it is there."""
     if (path := store.clips.get(key)) is not None:
         if await hass.async_add_executor_job(path.is_file):
             store.clips.move_to_end(key)
@@ -579,6 +635,18 @@ async def async_get_clip(
     if (path := await hass.async_add_executor_job(_saved_clip, store, key)) is not None:
         store.clips[key] = path
         store.clips.move_to_end(key)
+        return path
+    return None
+
+
+async def async_get_clip(
+    hass: HomeAssistant, camera: Camera, begin: datetime, end: datetime, fmt: str
+) -> Path:
+    """The MP4 of one recording, from the cache or fetched from the camera now."""
+    _validate_clip(begin, end, fmt)
+    store = await async_get_store(hass)
+    key = (camera.serial, utc_stamp(begin), utc_stamp(end), fmt)
+    if (path := await _lookup_clip(hass, store, key)) is not None:
         return path
     if (pending := store.pending.get(key)) is not None:
         return await asyncio.shield(pending)
@@ -594,6 +662,42 @@ async def async_get_clip(
         store.pending.pop(key, None)
     future.set_result(path)
     return path
+
+
+async def async_get_temp_clip(
+    hass: HomeAssistant, camera: Camera, begin: datetime, end: datetime, fmt: str
+) -> tuple[Path, bool]:
+    """One recording to watch, without keeping it in the media folder.
+
+    Returns ``(path, saved)``. ``saved`` is true when a copy was already in the
+    media folder (from an earlier play with saving on, or the download service):
+    that copy is served and nothing new is stored. Otherwise the clip is fetched
+    into the temp folder, left there for a couple of hours and never listed as
+    local or shown under Media.
+    """
+    _validate_clip(begin, end, fmt)
+    store = await async_get_store(hass)
+    key = (camera.serial, utc_stamp(begin), utc_stamp(end), fmt)
+    if (path := await _lookup_clip(hass, store, key)) is not None:
+        return path, True
+    root = await hass.async_add_executor_job(_prepare_temp_root, temp_root(hass))
+    if (path := await hass.async_add_executor_job(_saved_temp, root, key)) is not None:
+        store.temp[key] = path
+        return path, False
+    if (pending := store.temp_pending.get(key)) is not None:
+        return await asyncio.shield(pending), False
+    future: asyncio.Future[Path] = asyncio.get_running_loop().create_future()
+    store.temp_pending[key] = future
+    try:
+        path = await _async_fetch(hass, store, camera, key, fmt, keep=False, root=root)
+    except BaseException as err:
+        future.set_exception(err if isinstance(err, Exception) else RecordingError("Cancelled"))
+        future.exception()  # mark retrieved: nobody else may be waiting
+        raise
+    finally:
+        store.temp_pending.pop(key, None)
+    future.set_result(path)
+    return path, False
 
 
 async def async_latest_recording(
@@ -641,6 +745,9 @@ async def _async_fetch(
     camera: Camera,
     key: tuple[str, str, str, str],
     fmt: str,
+    *,
+    keep: bool = True,
+    root: Path | None = None,
 ) -> Path:
     from .live import ffmpeg_binary, find_stream
 
@@ -648,6 +755,12 @@ async def _async_fetch(
     live = find_stream(hass, serial)
     if live is not None and live.active:
         raise RecordingError("The camera is streaming live; stop the live view first")
+    if keep:
+        target_dir = store.root
+    else:
+        target_dir = root or await hass.async_add_executor_job(
+            _prepare_temp_root, temp_root(hass)
+        )
     started = time.monotonic()
     async with store.lock(serial):
         ps = await hass.async_add_executor_job(
@@ -660,17 +773,20 @@ async def _async_fetch(
             camera.code,
         )
     fetched = time.monotonic()
-    target = store.root / f"{serial}_{begin}_{end}_{fmt}.mp4"
+    target = target_dir / f"{serial}_{begin}_{end}_{fmt}.mp4"
     await _async_to_mp4(ffmpeg_binary(hass), ps, fmt, target)
     _LOGGER.debug(
         "Recording %s %s-%s: %d bytes from the camera in %.1f s, %s MP4 in %.1f s",
         serial, begin, end, len(ps), fetched - started, fmt, time.monotonic() - fetched,
     )
-    store.clips[key] = target
-    store.clips.move_to_end(key)
-    # Clips are kept until the retention setting ages them out; a download is a
-    # good moment to sweep, since the folder is on disk anyway.
-    await async_prune_recordings(hass)
+    if keep:
+        store.clips[key] = target
+        store.clips.move_to_end(key)
+        # Clips are kept until the retention setting ages them out; a download is
+        # a good moment to sweep, since the folder is on disk anyway.
+        await async_prune_recordings(hass)
+    else:
+        store.temp[key] = target
     return target
 
 
@@ -697,7 +813,8 @@ class RecordingClipView(HomeAssistantView):
         """The clip's file, or 404 once retention has removed it."""
         hass = request.app[KEY_HASS]
         store = await async_get_store(hass)
-        path = store.clips.get((serial, begin, end, fmt))
+        key = (serial, begin, end, fmt)
+        path = store.clips.get(key) or store.temp.get(key)
         if path is None or not path.is_file():
             raise web.HTTPNotFound
         return web.FileResponse(

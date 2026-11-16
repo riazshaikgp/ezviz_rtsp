@@ -136,6 +136,7 @@ hide_snapshot: false   # optional; hide the snapshot chip
 show_timestamp: false  # optional; show the picture's date and time
 show_battery: true     # optional; false hides the battery level
 hide_recordings: false # optional; hide the recordings button
+save_recordings: true  # optional; false keeps watched clips out of media
 ```
 
 | Option | Default | What it does |
@@ -154,6 +155,7 @@ hide_recordings: false # optional; hide the recordings button
 | `show_timestamp` | `false` | Show the date and time of the picture currently on the card (the motion or snapshot image, whichever `picture` selects) in the top-right corner. It disappears while a clip is playing. |
 | `show_battery` | `true` | Show the camera's charge next to the name, when the integration exposes it. `false` hides it. |
 | `hide_recordings` | `false` | Hide the recordings button (and with it the SD-card view) from this card. |
+| `save_recordings` | `true` | Keep the recordings you watch in the media folder. With `false`, a watched clip is fetched into a temporary folder, deleted after about two hours, and never appears under **Media**; one already saved earlier still plays from its permanent copy. |
 
 All of these are also in the card's **visual editor**, which lists your cameras
 and exposes the picture and button options. By default the card does nothing
@@ -402,6 +404,7 @@ entity: camera.driveway_gate   # or serial: BB1234567
 title: Driveway gate           # optional; defaults to "<camera> recordings"
 format: auto                   # optional; auto, h264 or hevc
 max_height: 360                # optional; height of the list in pixels
+save_recordings: true          # optional; false keeps watched clips out of media
 ```
 
 | Option | Default | What it does |
@@ -411,6 +414,7 @@ max_height: 360                # optional; height of the list in pixels
 | `title` | "*camera* recordings" | The heading in the card. |
 | `format` | `auto` | The video format the card asks for. `auto` asks for the camera's own **HEVC** when the browser says it can play it and for **H.264** otherwise; if HEVC then fails to play, it asks for H.264 once. `hevc` or `h264` force one. |
 | `max_height` | `360` | Height of the scrolling list, in pixels. |
+| `save_recordings` | `true` | Keep the recordings you watch in the media folder. With `false`, a watched clip is fetched into a temporary folder, deleted after about two hours, and never appears under **Media**. |
 
 ### Using it
 
@@ -433,6 +437,12 @@ max_height: 360                # optional; height of the list in pixels
   one that still has to be fetched from the camera, a green **check** for one
   already saved under `media/ezviz_rtsp/` (in either format). It turns into a
   check as soon as you play the clip.
+- **Watching a clip saves it by default.** Turn **Save watched recordings**
+  (`save_recordings: false`) off in the card's settings to keep the media folder
+  clean: a watched recording is then fetched into a temporary folder, plays the
+  same, is deleted after about two hours and never appears under **Media**. It
+  does not get a green check, and the retention setting does not apply to it. A
+  clip already saved earlier still plays from its permanent copy.
 - The list is read the first time the card is on screen, not when a dashboard
   merely contains it; a card that leaves the screen pauses its player.
 

@@ -17,6 +17,7 @@
 //   show_timestamp: false  # optional; show the picture's date and time
 //   show_battery: true     # optional; false hides the battery level
 //   hide_recordings: false # optional; hide the recordings button
+//   save_recordings: true  # optional; false keeps watched clips out of media
 //
 // The card shows the camera's live picture from the integration's own stream:
 // its fast MJPEG path (an <img> that appears a few seconds after the camera
@@ -111,6 +112,8 @@ const STRINGS = /* translations */ {
     "show_timestamp": "Show the picture date and time",
     "show_battery": "Show the battery level",
     "hide_recordings": "Hide the recordings button",
+    "save_recordings": "Save watched recordings",
+    "save_recordings_helper": "Keep the clips you play in the media folder. When off, a watched recording is downloaded to a temporary folder, deleted after about two hours, and never appears under Media.",
     "recordings": "Recordings",
     "recordings_show": "Show the camera's recordings",
     "recordings_hide": "Back to the live view",
@@ -128,7 +131,7 @@ const STRINGS = /* translations */ {
     "rec_refresh": "Refresh",
     "rec_pick": "Tap a recording to play it",
     "rec_close": "Close player",
-    "rec_cloud": "On the camera's SD card — tap to save it locally",
+    "rec_cloud": "On the camera's SD card (not saved locally)",
     "rec_local": "Saved in the media folder"
   },
   "uk": {
@@ -160,6 +163,8 @@ const STRINGS = /* translations */ {
     "show_timestamp": "Показувати дату й час знімка",
     "show_battery": "Показувати заряд батареї",
     "hide_recordings": "Приховати кнопку записів",
+    "save_recordings": "Зберігати переглянуті записи",
+    "save_recordings_helper": "Зберігати відтворені кліпи в media. Якщо вимкнено, запис тимчасово завантажується, видаляється приблизно через дві години й не зʼявляється в Media.",
     "recordings": "Записи",
     "recordings_show": "Показати записи камери",
     "recordings_hide": "Повернутися до живого відео",
@@ -177,7 +182,7 @@ const STRINGS = /* translations */ {
     "rec_refresh": "Оновити",
     "rec_pick": "Торкніться запису, щоб відтворити",
     "rec_close": "Закрити плеєр",
-    "rec_cloud": "На SD-картці камери — торкніться, щоб зберегти локально",
+    "rec_cloud": "На SD-картці камери (не збережено локально)",
     "rec_local": "Збережено в media"
   }
 } /* end translations */;
@@ -207,6 +212,7 @@ const CARD_DEFAULTS = {
   show_timestamp: false,
   show_battery: true,
   hide_recordings: false,
+  save_recordings: true,
 };
 
 const style = /* css */ `
@@ -1350,9 +1356,11 @@ class EzvizVideoCard extends HTMLElement {
         begin: rec.begin,
         end: rec.end,
         format,
+        keep: this._config.save_recordings !== false,
       });
       if (gen !== this._clipGen || !this._recordings) return;
-      rec.local = true; // it is in the media folder from now on
+      // Only a clip the server kept (or already had) is local.
+      if (result.saved) rec.local = true;
       this._clipState = "playing";
       this._clipFormat = format;
       this._render();
@@ -1716,6 +1724,7 @@ class EzvizVideoCardEditor extends HTMLElement {
       { name: "show_timestamp", selector: { boolean: {} } },
       { name: "show_battery", selector: { boolean: {} } },
       { name: "hide_recordings", selector: { boolean: {} } },
+      { name: "save_recordings", selector: { boolean: {} } },
     ];
     // Reuse the same <ha-form>. Lovelace calls setConfig() after every change;
     // replacing the form then would collapse the dialog and jump its scroll
@@ -1743,8 +1752,11 @@ class EzvizVideoCardEditor extends HTMLElement {
     if (this._schemaKey !== schemaKey) {
       form.schema = schema;
       form.computeLabel = (field) => t(lang, field.name);
-      form.computeHelper = (field) =>
-        field.name === "picture" ? t(lang, "picture_helper") : "";
+      form.computeHelper = (field) => {
+        if (field.name === "picture") return t(lang, "picture_helper");
+        if (field.name === "save_recordings") return t(lang, "save_recordings_helper");
+        return "";
+      };
       this._schemaKey = schemaKey;
     }
     form.data = { ...CARD_DEFAULTS, ...this._config };
@@ -1972,6 +1984,7 @@ class EzvizSnapshotCard extends HTMLElement {
 //   title: Driveway gate          # optional; defaults to "<camera> recordings"
 //   format: auto                  # optional; auto, h264 or hevc (see below)
 //   max_height: 360               # optional; height of the list in pixels
+//   save_recordings: true         # optional; false keeps watched clips out of media
 //
 // Lists one day of the camera's SD-card recordings (newest first, today by
 // default, with buttons for earlier days) and plays the one you tap in the
@@ -2068,7 +2081,7 @@ class EzvizRecordingsCard extends HTMLElement {
     if (!config || (!config.serial && !config.entity)) {
       throw new Error("ezviz-recordings-card: 'entity' (or 'serial') is required");
     }
-    this._config = { format: "auto", max_height: 360, ...config };
+    this._config = { format: "auto", max_height: 360, save_recordings: true, ...config };
     this._device = undefined;
     this._list = null;
     this._day = null;
@@ -2218,9 +2231,11 @@ class EzvizRecordingsCard extends HTMLElement {
         begin: rec.begin,
         end: rec.end,
         format,
+        keep: this._config.save_recordings !== false,
       });
       if (gen !== this._clipGen) return;
-      rec.local = true; // it is in the media folder from now on
+      // Only a clip the server kept (or already had) is local.
+      if (result.saved) rec.local = true;
       this._clipState = "playing";
       this._clipFormat = format;
       this._render();

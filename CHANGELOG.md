@@ -40,6 +40,10 @@ This project follows [Semantic Versioning](https://semver.org/).
   corner.
 - **`hide_recordings`** on the video card (default `false`): hide the filmstrip
   button for a dashboard that should not offer the SD-card view.
+- **`save_recordings`** on both cards (default `true`): with `false`, a recording
+  you watch is fetched into a temporary folder, deleted after about two hours and
+  kept out of **Media** (no green check, no retention); a clip saved earlier
+  still plays from its permanent copy.
 
 ### Fixed
 - **Playing a recording right after watching live no longer fails.** The card

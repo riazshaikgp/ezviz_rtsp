@@ -260,6 +260,7 @@ async def test_websocket_lists_a_day_and_hands_out_a_clip(
             )
             clip = await ws.receive_json()
             assert clip["success"], clip
+            assert clip["result"]["saved"] is True
         assert download.call_count == 1
         args = download.call_args.args
         assert args[1:5] == ("BK1", newest["begin"], newest["end"], "Africa/Johannesburg")
@@ -331,6 +332,127 @@ async def test_list_marks_a_clip_saved_in_either_format_as_local(
     flags = {r["begin"]: r["local"] for r in msg["result"]["recordings"]}
     assert flags[older["begin"]] is True
     assert flags[newer["begin"]] is False
+
+
+async def test_websocket_keeps_a_watched_clip_out_of_media_when_asked(
+    hass, hass_ws_client, hass_client, _cloud, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(rec_module, "temp_root", lambda _hass: tmp_path / "temp")
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    tz = ZoneInfo("Africa/Johannesburg")
+    yesterday = datetime.now(tz).date() - timedelta(days=1)
+    starts = [
+        datetime.combine(yesterday, datetime.min.time()) + timedelta(hours=h)
+        for h in (8, 9)
+    ]
+    await _setup_with_index(hass, starts)
+    ws = await hass_ws_client(hass)
+    await ws.send_json(
+        {"id": 1, "type": "ezviz_rtsp/recordings", "serial": "BK1", "date": yesterday.isoformat()}
+    )
+    newest = (await ws.receive_json())["result"]["recordings"][0]
+
+    async def fake_mp4(_bin, ps, fmt, target):
+        target.write_bytes(b"\0\0\0\x18ftypmp42" + ps + fmt.encode())
+
+    message = {
+        "type": "ezviz_rtsp/recording/clip",
+        "serial": "BK1",
+        "begin": newest["begin"],
+        "end": newest["end"],
+        "format": "hevc",
+        "keep": False,
+    }
+    with (
+        patch.object(rec_module, "_download_clip", return_value=b"PSDATA") as download,
+        patch.object(rec_module, "_async_to_mp4", side_effect=fake_mp4),
+        patch("custom_components.ezviz_rtsp.live.ffmpeg_binary", return_value="ffmpeg"),
+    ):
+        await ws.send_json({"id": 2, **message})
+        clip = await ws.receive_json()
+        assert clip["success"], clip
+        assert clip["result"]["saved"] is False
+
+        # Nothing was stored under Media; the temporary copy is what plays.
+        store = await rec_module.async_get_store(hass)
+        assert not list(store.root.glob("*.mp4"))
+        temp_file = tmp_path / "temp" / f"BK1_{newest['begin']}_{newest['end']}_hevc.mp4"
+        assert temp_file.exists()
+        client = await hass_client()
+        response = await client.get(clip["result"]["url"])
+        assert response.status == 200
+        assert (await response.read()).startswith(b"\0\0\0\x18ftypmp42")
+
+        # Playing it again reuses the temporary copy instead of waking the camera.
+        await ws.send_json({"id": 3, **message})
+        again = await ws.receive_json()
+        assert again["success"], again
+        assert again["result"]["saved"] is False
+        assert download.call_count == 1
+
+
+async def test_a_clip_already_saved_is_kept_with_saving_off(
+    hass, hass_ws_client, _cloud, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(rec_module, "temp_root", lambda _hass: tmp_path / "temp")
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    tz = ZoneInfo("Africa/Johannesburg")
+    yesterday = datetime.now(tz).date() - timedelta(days=1)
+    starts = [
+        datetime.combine(yesterday, datetime.min.time()) + timedelta(hours=h)
+        for h in (8, 9)
+    ]
+    await _setup_with_index(hass, starts)
+    ws = await hass_ws_client(hass)
+    await ws.send_json(
+        {"id": 1, "type": "ezviz_rtsp/recordings", "serial": "BK1", "date": yesterday.isoformat()}
+    )
+    newest = (await ws.receive_json())["result"]["recordings"][0]
+
+    async def fake_mp4(_bin, ps, fmt, target):
+        target.write_bytes(b"\0\0\0\x18ftypmp42" + ps + fmt.encode())
+
+    message = {
+        "type": "ezviz_rtsp/recording/clip",
+        "serial": "BK1",
+        "begin": newest["begin"],
+        "end": newest["end"],
+        "format": "hevc",
+    }
+    with (
+        patch.object(rec_module, "_download_clip", return_value=b"PSDATA") as download,
+        patch.object(rec_module, "_async_to_mp4", side_effect=fake_mp4),
+        patch("custom_components.ezviz_rtsp.live.ffmpeg_binary", return_value="ffmpeg"),
+    ):
+        # Saved the normal way first...
+        await ws.send_json({"id": 2, "keep": True, **message})
+        first = await ws.receive_json()
+        assert first["success"], first
+        assert first["result"]["saved"] is True
+
+        # ...then watched with saving off: the media copy answers, nothing new.
+        await ws.send_json({"id": 3, "keep": False, **message})
+        second = await ws.receive_json()
+        assert second["success"], second
+        assert second["result"]["saved"] is True
+        assert download.call_count == 1
+
+    temp = tmp_path / "temp"
+    assert not temp.exists() or not list(temp.glob("*.mp4"))
+
+
+def test_temp_clips_are_swept_after_their_short_life(tmp_path) -> None:
+    fresh = tmp_path / "BK1_20261110T080000Z_20261110T080008Z_h264.mp4"
+    stale = tmp_path / "BK1_20261110T090000Z_20261110T090008Z_h264.mp4"
+    fresh.write_bytes(b"mp4")
+    stale.write_bytes(b"mp4")
+    old = time.time() - rec_module.TEMP_CLIP_SECONDS - 60
+    os.utime(stale, (old, old))
+
+    rec_module._sweep_temp(tmp_path)
+
+    assert fresh.exists()
+    assert not stale.exists()
 
 
 async def test_clip_refused_while_the_camera_streams_live(hass, _cloud) -> None:

@@ -26,6 +26,7 @@ from .recordings import (
     RecordingError,
     async_get_clip,
     async_get_store,
+    async_get_temp_clip,
     async_list_day,
     clip_path,
     find_camera,
@@ -189,6 +190,9 @@ async def ws_recordings(
         vol.Required("begin"): str,
         vol.Required("end"): str,
         vol.Optional("format", default="h264"): vol.In(FORMATS),
+        # Keep the clip in the media folder (default), or fetch a temporary copy
+        # that is deleted after a couple of hours and never shows under Media.
+        vol.Optional("keep", default=True): bool,
     }
 )
 @async_response
@@ -198,21 +202,32 @@ async def ws_recording_clip(
     """Fetch one recording from the camera (or the cache) and hand out its address.
 
     Waits until the MP4 is ready, so the card can show progress and errors; the
-    address is a short-lived signed path to the authenticated clip view.
+    address is a short-lived signed path to the authenticated clip view. With
+    ``keep`` off the clip is not stored in the media folder; ``saved`` in the
+    answer says whether a permanent copy exists (now or from an earlier play).
     """
     camera = find_camera(hass, msg["serial"])
     if camera is None:
         connection.send_error(msg["id"], "not_found", "Camera not found in a loaded account")
         return
+    saved = True
     try:
         begin, end = parse_stamp(msg["begin"]), parse_stamp(msg["end"])
-        await async_get_clip(hass, camera, begin, end, msg["format"])
+        if msg["keep"]:
+            await async_get_clip(hass, camera, begin, end, msg["format"])
+        else:
+            _, saved = await async_get_temp_clip(hass, camera, begin, end, msg["format"])
     except RecordingError as err:
         connection.send_error(msg["id"], "recording_failed", str(err))
         return
     path = clip_path(camera.serial, utc_stamp(begin), utc_stamp(end), msg["format"])
     connection.send_result(
-        msg["id"], {"url": async_sign_path(hass, path, CLIP_URL_TTL), "format": msg["format"]}
+        msg["id"],
+        {
+            "url": async_sign_path(hass, path, CLIP_URL_TTL),
+            "format": msg["format"],
+            "saved": saved,
+        },
     )
 
 
