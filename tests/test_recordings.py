@@ -136,7 +136,7 @@ def test_search_day_reports_a_cut_short_list() -> None:
 
 @pytest.mark.parametrize(
     ("code", "text"),
-    [("2009", "did not answer in time"), ("2004", "SD card"), ("9999", "Could not read")],
+    [("2009", "did not answer in time"), ("9999", "Could not read")],
 )
 def test_search_day_explains_camera_errors(code: str, text: str, monkeypatch) -> None:
     monkeypatch.setattr(rec_module, "WAKE_RETRY_SECONDS", 0)
@@ -145,6 +145,49 @@ def test_search_day_explains_camera_errors(code: str, text: str, monkeypatch) ->
         search_day(index, "BB1", date(2026, 11, 9), TZ, datetime(2026, 11, 10, tzinfo=TZ))
     # Only the "camera asleep" answer is retried, and only once.
     assert len(index.calls) == (2 if code == "2009" else 1)
+
+
+def test_search_day_reads_an_empty_day(monkeypatch) -> None:
+    """A new day with no recordings yet answers 2004; that is an empty day."""
+    monkeypatch.setattr(rec_module, "WAKE_RETRY_SECONDS", 0)
+    index = FakeIndex([], fail=PyEzvizError("Could not search v2 records: response code=2004"))
+    found, complete = search_day(
+        index, "BB1", date(2026, 11, 9), TZ, datetime(2026, 11, 10, tzinfo=TZ)
+    )
+    assert found == [] and complete
+    assert len(index.calls) == 1, "an empty day is not retried or reported as an error"
+
+
+def test_search_day_stops_at_a_quiet_stretch() -> None:
+    """2004 after the last page means the rest of the day has no clips."""
+
+    class LastPage:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def search_records_v2(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return {
+                    "records": _packed([_rec(datetime(2026, 11, 9, 8, 0))]),
+                    "isFinished": 0,
+                }
+            raise PyEzvizError("Could not search v2 records: response code=2004")
+
+    index = LastPage()
+    found, complete = search_day(
+        index, "BB1", date(2026, 11, 9), TZ, datetime(2026, 11, 10, tzinfo=TZ)
+    )
+    assert complete
+    assert len(found) == 1
+    assert index.calls == 2
+
+
+def test_day_has_records_reads_an_empty_day(monkeypatch) -> None:
+    monkeypatch.setattr(rec_module, "WAKE_RETRY_SECONDS", 0)
+    index = FakeIndex([], fail=PyEzvizError("Could not search v2 records: response code=2004"))
+    now = datetime(2026, 11, 17, 12, 0, tzinfo=TZ)
+    assert rec_module.day_has_records(index, "BB1", date(2026, 11, 16), TZ, now) is False
 
 
 def test_search_day_retries_once_while_the_camera_wakes(monkeypatch) -> None:
@@ -428,10 +471,10 @@ async def test_a_failed_shared_read_can_be_tried_again(hass, _cloud) -> None:
     entry, index = await _setup_with_index(hass, [])
     camera = rec_module.find_camera(hass, "BK1")
     def fail(*args, **kwargs):
-        raise PyEzvizError("2004")
+        raise PyEzvizError("Could not search v2 records: response code=50000")
 
     entry.runtime_data.ezviz_client.search_records_v2 = fail
-    with pytest.raises(rec_module.RecordingError, match="problem reading"):
+    with pytest.raises(rec_module.RecordingError, match="Could not read"):
         await rec_module.async_list_day(hass, camera, day)
     # The failed read is forgotten, so the next attempt reaches the camera.
     entry.runtime_data.ezviz_client.search_records_v2 = index.search_records_v2

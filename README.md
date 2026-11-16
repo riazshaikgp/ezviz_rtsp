@@ -410,7 +410,9 @@ day of a camera's recordings and plays the one you tap, right in the card.
   button searches the camera again.
 - Recordings are listed **newest first, grouped by hour**, each with its start
   time and length. A camera that records motion events typically shows clips of
-  8–16 seconds; a busy camera can have a few hundred a day.
+  8–16 seconds; a busy camera can have a few hundred a day. A day with nothing
+  recorded yet — today just after midnight, for instance — simply says **"No
+  recordings on this day"**.
 - **Tap a recording to play it** in the card's player, with the usual video
   controls (pause, seek, full screen). Tap another to switch, or close the
   player with ✕. The card shows "Fetching the recording from the camera…"
@@ -460,10 +462,9 @@ day of a camera's recordings and plays the one you tap, right in the card.
   camera every time. The calendar's month dots are read from the cache and the
   media folder until you press **Check the SD card for this month**, which is
   the only part that asks the camera. Switching days quickly shares the read
-  already on its way instead of starting another camera session for every tap,
-  so a burst of taps cannot make the camera answer **2004**. The ⟳ button
-  always reads the camera again, and a past day stays cached. A card that
-  leaves the screen pauses its player.
+  already on its way instead of starting another camera session for every tap.
+  The ⟳ button always reads the camera again, and a past day stays cached. A
+  card that leaves the screen pauses its player.
 
 ### Getting the latest recording on demand
 
@@ -722,14 +723,6 @@ Re-check it under **Configure → Verification codes**.
 
 The camera was asleep and didn't answer the SD search (EZVIZ error 2009); the
 integration already asked twice. Press refresh — it is usually awake by then.
-
-</details>
-
-<details>
-<summary>The recordings view reports a problem reading the SD card</summary>
-
-EZVIZ answered the search with a device exception (error 2004). Check the
-camera's storage in the EZVIZ app: the card may need formatting, or replacing.
 
 </details>
 

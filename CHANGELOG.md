@@ -114,13 +114,19 @@ This project follows [Semantic Versioning](https://semver.org/).
   says to close the EZVIZ app or the other live view.
 - **Switching days quickly no longer queues a camera session per tap.** Tapping
   today, another day and today again while the first read was still on its way
-  put one SD-card read behind another, and after a few the camera answered
-  **2004** ("The camera reported a problem reading its SD card"). The card now
-  joins the read already in flight for a day instead of sending another, and
-  the integration shares one per-day read between every waiting request (also
-  across two cards or browsers), so rapid switching costs one camera session per
-  day, not one per tap. A failed shared read is forgotten, and the next attempt
-  reaches the camera again.
+  put one SD-card read behind another. The card now joins the read already in
+  flight for a day instead of sending another, and the integration shares one
+  per-day read between every waiting request (also across two cards or
+  browsers), so rapid switching costs one camera session per day, not one per
+  tap. A failed shared read is forgotten, and the next attempt reaches the
+  camera again.
+- **A new day with no recordings yet is no longer an error.** EZVIZ answers a
+  record search with error **2004** when the window holds no recordings at all —
+  yesterday just after midnight, or a quiet hour between events. The integration
+  took that for a failed SD card and showed "The camera reported a problem
+  reading its SD card." instead of an empty day. It is now read as an empty
+  result, so today's list simply says there are no recordings yet (and the
+  calendar month scan also treats such a day as empty).
 
 ### Changed
 - Requires **pyezvizapi 2.5.1** (was 1.0.5.0). 2.0.0 added SD playback through

@@ -595,6 +595,11 @@ def search_day(
                 size=PAGE_SIZE,
             )
         except PyEzvizError as err:
+            # The index answers 2004 when there are no recordings at all in the
+            # window — a new day before the first event, or a quiet stretch
+            # after the last one. That is an empty result, not a failure.
+            if "2004" in str(err):
+                return sorted(found), True
             # A sleeping camera answers the first search with 2009 while it wakes
             # (like capture_picture); ask once more after a moment.
             if "2009" not in str(err) or retried:
@@ -625,8 +630,6 @@ def _explain(err: Exception) -> str:
     text = str(err)
     if "2009" in text:
         return "The camera did not answer in time; it may be asleep or offline. Try again."
-    if "2004" in text:
-        return "The camera reported a problem reading its SD card."
     return f"Could not read the camera's recordings: {text}"
 
 
@@ -649,8 +652,8 @@ async def async_list_day(
     if day > now.date():
         return [], True
     # Switching days quickly used to queue one SD session per tap behind the
-    # camera lock, and the camera answered 2004 after a few. Everyone waiting
-    # for the same day shares the read that is already on its way.
+    # camera lock. Everyone waiting for the same day shares the read that is
+    # already on its way.
     task = store.day_tasks.get(key)
     if task is not None and task.done():
         # It finished before its callback cleared the map: do not hand a stale
@@ -737,6 +740,9 @@ def day_has_records(
                 size=1,
             )
         except PyEzvizError as err:
+            # 2004 here means the window holds no recordings at all.
+            if "2004" in str(err):
+                return False
             if "2009" not in str(err) or retried:
                 raise RecordingError(_explain(err)) from err
             retried = True

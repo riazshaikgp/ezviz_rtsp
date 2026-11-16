@@ -1304,9 +1304,9 @@ class EzvizVideoCard extends HTMLElement {
     this._listError = "";
     this._render();
     // One SD read per camera and day at a time. Tapping today, another day and
-    // today again used to queue a camera session for every tap (the camera
-    // answered 2004 after a few); a repeat now joins the read already on its
-    // way. The day the server will use stands in for "today" until it tells us.
+    // today again used to queue a camera session for every tap; a repeat now
+    // joins the read already on its way. The day the server will use stands in
+    // for "today" until it tells us.
     const readDay = this._day || this._today || localDay(new Date());
     const readKey = `${serial}|${readDay}`;
     let read = this._reads.get(readKey);
