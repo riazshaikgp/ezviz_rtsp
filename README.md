@@ -157,14 +157,15 @@ save_recordings: true  # optional; false keeps watched clips out of media
 | `hide_recordings` | `false` | Hide the recordings button (and with it the SD-card view) from this card. |
 | `save_recordings` | `true` | Keep the recordings you watch in the media folder. With `false`, a watched clip is fetched into a temporary folder, deleted after about two hours, and never appears under **Media**; one already saved earlier still plays from its permanent copy. |
 
-All of these are also in the card's **visual editor**, which lists your cameras
-and exposes the picture and button options. By default the card does nothing
-until you press play: it shows the camera's **last alarm picture** with a small
-Mushroom-style **play chip in the bottom-right corner**. Pressing it starts the
-live view, which runs for `max_seconds`; a **Stop** chip in the same corner ends
-it early. The **snapshot chip in the bottom-left** asks the camera for a fresh
-picture at any time, idle or while a clip is playing, and shows a spinner while
-it works. Hide any of the three with `hide_play`, `hide_stop` or
+All of these are also in the card's **visual editor**, grouped into **Camera**,
+**Playback**, **Picture and snapshots**, **Buttons and battery** and
+**Recordings** sections with your cameras listed. By default the card does
+nothing until you press play: it shows the camera's **last alarm picture** with
+a small Mushroom-style **play chip in the bottom-right corner**. Pressing it
+starts the live view, which runs for `max_seconds`; a **Stop** chip in the same
+corner ends it early. The **snapshot chip in the bottom-left** asks the camera
+for a fresh picture at any time, idle or while a clip is playing, and shows a
+spinner while it works. Hide any of the three with `hide_play`, `hide_stop` or
 `hide_snapshot`. When `max_seconds` runs out the card quietly returns to the
 last picture — press play again to watch another clip; nothing has to be
 reloaded.
@@ -220,8 +221,9 @@ Every open and close is written to the Home Assistant log
 limit`), so you can confirm in the log that the camera actually went back to
 sleep.
 
-The **visual editor** lists your cameras, the idle picture and the three button
-toggles, so nothing above has to be typed by hand.
+The **visual editor** lists your cameras and groups the options into **Camera**,
+**Playback**, **Picture and snapshots**, **Buttons and battery** and
+**Recordings** sections, so nothing above has to be typed by hand.
 
 ---
 

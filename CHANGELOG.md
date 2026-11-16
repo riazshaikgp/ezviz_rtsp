@@ -83,6 +83,9 @@ This project follows [Semantic Versioning](https://semver.org/).
   integration names any other enabled integration that pins a `pyezvizapi`
   version it cannot share (the built-in `ezviz` integration, which pins 1.x, is
   the usual one), so it is clear which one to ignore or remove.
+- **The video card's editor is grouped into sections** — **Camera**,
+  **Playback**, **Picture and snapshots**, **Buttons and battery** and
+  **Recordings** — instead of one long list of every option.
 
 ## [1.6.0] — 2026-11-07
 

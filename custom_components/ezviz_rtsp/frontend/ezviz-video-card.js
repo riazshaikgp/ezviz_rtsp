@@ -114,6 +114,11 @@ const STRINGS = /* translations */ {
     "hide_recordings": "Hide the recordings button",
     "save_recordings": "Save watched recordings",
     "save_recordings_helper": "Keep the clips you play in the media folder. When off, a watched recording is downloaded to a temporary folder, deleted after about two hours, and never appears under Media.",
+    "section_camera": "Camera",
+    "section_playback": "Playback",
+    "section_picture": "Picture and snapshots",
+    "section_buttons": "Buttons and battery",
+    "section_recordings": "Recordings",
     "recordings": "Recordings",
     "recordings_show": "Show the camera's recordings",
     "recordings_hide": "Back to the live view",
@@ -165,6 +170,11 @@ const STRINGS = /* translations */ {
     "hide_recordings": "Приховати кнопку записів",
     "save_recordings": "Зберігати переглянуті записи",
     "save_recordings_helper": "Зберігати відтворені кліпи в media. Якщо вимкнено, запис тимчасово завантажується, видаляється приблизно через дві години й не зʼявляється в Media.",
+    "section_camera": "Камера",
+    "section_playback": "Відтворення",
+    "section_picture": "Знімок і снапшоти",
+    "section_buttons": "Кнопки та батарея",
+    "section_recordings": "Записи",
     "recordings": "Записи",
     "recordings_show": "Показати записи камери",
     "recordings_hide": "Повернутися до живого відео",
@@ -1695,36 +1705,57 @@ class EzvizVideoCardEditor extends HTMLElement {
       value: d.serial,
       label: `${d.name} (${d.serial})${d.battery ? " 🔋" : ""}`,
     }));
+    const section = (name, icon, fields) => ({
+      // A collapsible block of related options. `flatten` keeps the form's
+      // data flat, so every field stays a top-level card option.
+      type: "expandable",
+      name,
+      flatten: true,
+      expanded: true,
+      icon,
+      title: t(lang, name),
+      schema: fields,
+    });
     const schema = [
-      { name: "serial", selector: { select: { options, mode: "dropdown" } } },
-      { name: "title", selector: { text: {} } },
-      { name: "icon", selector: { icon: {} } },
-      { name: "auto_play", selector: { boolean: {} } },
-      { name: "capture_on_load", selector: { boolean: {} } },
-      {
-        name: "max_seconds",
-        selector: { number: { min: 0, max: 600, mode: "box", unit_of_measurement: "s" } },
-      },
-      {
-        name: "picture",
-        selector: {
-          select: {
-            mode: "dropdown",
-            options: [
-              { value: "motion", label: t(lang, "picture_motion") },
-              { value: "snapshot", label: t(lang, "picture_snapshot") },
-              { value: "newest", label: t(lang, "picture_newest") },
-            ],
+      section("section_camera", "mdi:video-outline", [
+        { name: "serial", selector: { select: { options, mode: "dropdown" } } },
+        { name: "title", selector: { text: {} } },
+        { name: "icon", selector: { icon: {} } },
+      ]),
+      section("section_playback", "mdi:play-circle-outline", [
+        { name: "auto_play", selector: { boolean: {} } },
+        {
+          name: "max_seconds",
+          selector: { number: { min: 0, max: 600, mode: "box", unit_of_measurement: "s" } },
+        },
+      ]),
+      section("section_picture", "mdi:image-outline", [
+        { name: "capture_on_load", selector: { boolean: {} } },
+        {
+          name: "picture",
+          selector: {
+            select: {
+              mode: "dropdown",
+              options: [
+                { value: "motion", label: t(lang, "picture_motion") },
+                { value: "snapshot", label: t(lang, "picture_snapshot") },
+                { value: "newest", label: t(lang, "picture_newest") },
+              ],
+            },
           },
         },
-      },
-      { name: "hide_play", selector: { boolean: {} } },
-      { name: "hide_stop", selector: { boolean: {} } },
-      { name: "hide_snapshot", selector: { boolean: {} } },
-      { name: "show_timestamp", selector: { boolean: {} } },
-      { name: "show_battery", selector: { boolean: {} } },
-      { name: "hide_recordings", selector: { boolean: {} } },
-      { name: "save_recordings", selector: { boolean: {} } },
+        { name: "show_timestamp", selector: { boolean: {} } },
+      ]),
+      section("section_buttons", "mdi:tune-variant", [
+        { name: "hide_play", selector: { boolean: {} } },
+        { name: "hide_stop", selector: { boolean: {} } },
+        { name: "hide_snapshot", selector: { boolean: {} } },
+        { name: "show_battery", selector: { boolean: {} } },
+      ]),
+      section("section_recordings", "mdi:filmstrip-box-multiple", [
+        { name: "hide_recordings", selector: { boolean: {} } },
+        { name: "save_recordings", selector: { boolean: {} } },
+      ]),
     ];
     // Reuse the same <ha-form>. Lovelace calls setConfig() after every change;
     // replacing the form then would collapse the dialog and jump its scroll
