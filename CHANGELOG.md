@@ -112,6 +112,13 @@ This project follows [Semantic Versioning](https://semver.org/).
   integration names any other enabled integration that pins a `pyezvizapi`
   version it cannot share (the built-in `ezviz` integration, which pins 1.x, is
   the usual one), so it is clear which one to ignore or remove.
+- **Taps that come faster than the camera now favour the newest recording.**
+  While one clip is being fetched, tapping another only remembers the latest:
+  the recordings in between are not downloaded at all, so the camera is not
+  woken for clips you skipped, and the waiting view says "Waiting for the
+  current recording to finish…". A recording already in the media folder still
+  plays at once, past the queue. A queued clip checks for a live view again once
+  it gets its turn and refuses rather than fighting a stream started meanwhile.
 - **The video card's editor is grouped into sections** — **Camera**,
   **Playback**, **Picture and snapshots**, **Buttons and battery** and
   **Recordings** — instead of one long list of every option.

@@ -130,6 +130,7 @@ const STRINGS = /* translations */ {
     "rec_loading": "Reading the SD card…",
     "rec_fetching": "Fetching the recording from the camera…",
     "rec_redownloading": "The saved recording is incomplete — downloading it again…",
+    "rec_queued": "Waiting for the current recording to finish…",
     "rec_failed": "{msg}",
     "rec_prev": "Previous day",
     "rec_next": "Next day",
@@ -186,6 +187,7 @@ const STRINGS = /* translations */ {
     "rec_loading": "Читаємо SD-картку…",
     "rec_fetching": "Завантажуємо запис із камери…",
     "rec_redownloading": "Збережений запис неповний — завантажуємо його повторно…",
+    "rec_queued": "Чекаємо, поки завершиться поточне завантаження…",
     "rec_failed": "{msg}",
     "rec_prev": "Попередній день",
     "rec_next": "Наступний день",
@@ -442,6 +444,9 @@ class EzvizVideoCard extends HTMLElement {
     this._selected = null; // the recording in the media area
     this._clipState = "idle"; // idle | fetching | playing | error
     this._clipIncomplete = false; // the saved copy is short: say it is re-fetched
+    this._clipFetching = null; // the camera download in flight, if any
+    this._queuedClip = null; // the newest tap waiting for that download
+    this._clipQueued = false; // the view is waiting, not fetching yet
     this._clipError = "";
     this._clipFormat = "";
     this._clipGen = 0;
@@ -1182,7 +1187,11 @@ class EzvizVideoCard extends HTMLElement {
     // The list is cached while the card lives; the refresh button re-reads it.
     if (this._list && !refresh) return;
     // The ⟳ button is above the list: a fresh read starts at the top.
-    if (refresh) this._listScrollReset = true;
+    if (refresh) {
+      this._listScrollReset = true;
+      this._queuedClip = null;
+      this._clipQueued = false;
+    }
     await this._loadDevices();
     if (!this._recordings) return;
     const serial = this._serial();
@@ -1404,23 +1413,58 @@ class EzvizVideoCard extends HTMLElement {
     return playsHevc() ? "hevc" : "h264";
   }
 
-  async _playRecording(rec, fallback = false) {
+  _playRecording(rec, fallback = false) {
+    if (!rec) return;
     const serial = this._serial();
-    if (!serial || !rec || !this._hass) return;
+    if (!serial || !this._hass) return;
+
+    // A complete copy in the media folder needs no camera: play it now, even
+    // while another clip is still coming off the SD card. It also supersedes
+    // anything waiting in the queue.
+    if (rec.local && !rec.incomplete) {
+      this._queuedClip = null;
+      this._clipQueued = false;
+      this._startClip(rec, fallback, false);
+      return;
+    }
+
+    // One camera download at a time. A tap while one is in flight only
+    // remembers the newest recording; the intermediate ones are never fetched.
+    if (this._clipFetching) {
+      this._clipGen++; // the download in flight no longer owns the view
+      this._clipVideo?.pause();
+      this._selected = rec;
+      this._clipState = "fetching";
+      this._clipError = "";
+      this._clipQueued = true;
+      this._clipIncomplete = Boolean(rec.incomplete);
+      this._queuedClip = { rec, fallback };
+      this._render();
+      return;
+    }
+    this._startClip(rec, fallback, true);
+  }
+
+  async _startClip(rec, fallback = false, cloud = false) {
+    const serial = this._serial();
+    if (!serial || !this._hass) return;
     const gen = ++this._clipGen;
     // A detached <video> keeps playing its sound: stop the old clip first.
     this._clipVideo?.pause();
     this._selected = rec;
     this._clipState = "fetching";
     this._clipError = "";
+    this._clipQueued = false;
     this._clipIncomplete = Boolean(rec.incomplete);
+    const ticket = cloud ? {} : null;
+    if (ticket) this._clipFetching = ticket;
     this._render();
-    // Another view (or another browser) may have started the live stream since
-    // the list was read; release it again so the camera is free for playback.
-    await this._stopLive();
-    if (gen !== this._clipGen || !this._recordings) return;
-    const format = this._recFormat(fallback);
     try {
+      // Another view (or another browser) may have started the live stream
+      // since the list was read; release it again so the camera is free.
+      await this._stopLive();
+      if (gen !== this._clipGen || !this._recordings) return;
+      const format = this._recFormat(fallback);
       const result = await this._hass.callWS({
         type: "ezviz_rtsp/recording/clip",
         serial,
@@ -1466,7 +1510,19 @@ class EzvizVideoCard extends HTMLElement {
       this._clipState = "error";
       this._clipError = err?.message || String(err);
       this._render();
+    } finally {
+      if (ticket && this._clipFetching === ticket) {
+        this._clipFetching = null;
+        this._startQueued();
+      }
     }
+  }
+
+  _startQueued() {
+    const queued = this._queuedClip;
+    this._queuedClip = null;
+    if (!queued || !this._recordings || !this._hass) return;
+    this._startClip(queued.rec, queued.fallback, true);
   }
 
   _closeClip() {
@@ -1486,6 +1542,8 @@ class EzvizVideoCard extends HTMLElement {
     this._clipError = "";
     this._clipFormat = "";
     this._clipIncomplete = false;
+    this._clipQueued = false;
+    this._queuedClip = null;
   }
 
   _ensureClipVideo() {
@@ -1510,7 +1568,11 @@ class EzvizVideoCard extends HTMLElement {
       message.className = "message";
       message.textContent = t(
         this._lang,
-        this._clipIncomplete ? "rec_redownloading" : "rec_fetching"
+        this._clipQueued
+          ? "rec_queued"
+          : this._clipIncomplete
+            ? "rec_redownloading"
+            : "rec_fetching"
       );
       media.appendChild(message);
       const spinner = document.createElement("div");

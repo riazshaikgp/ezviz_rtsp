@@ -524,6 +524,55 @@ async def test_clip_refused_while_the_camera_streams_live(hass, _cloud) -> None:
         download.assert_not_called()
 
 
+async def test_a_queued_clip_stops_when_live_starts_while_it_waits(
+    hass, _cloud
+) -> None:
+    await _setup_with_index(hass, [])
+    camera = rec_module.find_camera(hass, "BK1")
+    store = await rec_module.async_get_store(hass)
+    begin = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
+
+    class Gate:
+        """A lock that reports when a request has reached it."""
+
+        def __init__(self) -> None:
+            self.lock = asyncio.Lock()
+            self.waiting = asyncio.Event()
+
+        async def __aenter__(self):
+            self.waiting.set()
+            await self.lock.acquire()
+            return self
+
+        async def __aexit__(self, *exc):
+            self.lock.release()
+
+    gate = Gate()
+    store.locks["BK1"] = gate
+    await gate.lock.acquire()
+    live = SimpleNamespace(active=False)
+    try:
+        with (
+            patch("custom_components.ezviz_rtsp.live.find_stream", return_value=live),
+            patch.object(rec_module, "_download_clip", new=AsyncMock()) as download,
+        ):
+            task = asyncio.create_task(
+                rec_module.async_get_clip(
+                    hass, camera, begin, begin + timedelta(seconds=8), "h264"
+                )
+            )
+            await asyncio.wait_for(gate.waiting.wait(), 2)
+            # The live view starts while the request waits behind the lock.
+            live.active = True
+            gate.lock.release()
+            with pytest.raises(rec_module.RecordingError, match="streaming live"):
+                await task
+            download.assert_not_called()
+    finally:
+        if gate.lock.locked():
+            gate.lock.release()
+
+
 async def test_websocket_releases_the_live_stream_at_once(
     hass, hass_ws_client, _cloud
 ) -> None:

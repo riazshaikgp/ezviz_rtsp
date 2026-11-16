@@ -414,6 +414,11 @@ day of a camera's recordings and plays the one you tap, right in the card.
   player with ✕. The card shows "Fetching the recording from the camera…"
   while the clip is on its way, and the list stays at the row you tapped
   instead of jumping back to the top.
+- **Tapping several recordings in a row** while one is still being fetched only
+  remembers the newest: the ones in between are not downloaded, so the camera is
+  not woken for clips you skipped. The waiting view says "Waiting for the
+  current recording to finish…". A recording already saved in the media folder
+  still plays at once, without waiting for that download to finish.
 - **A recording already saved in the media folder is never fetched again** —
   unless its file is clearly shorter than the interval in its name, which means
   the download was cut off; then the card fetches it once more. It otherwise
@@ -526,10 +531,12 @@ recording is also readable from the **Media** browser under `ezviz_rtsp`.
   a few seconds of CPU per clip on a Raspberry Pi 5.
 - **One viewer at a time.** EZVIZ serves one cloud session per camera. Stop
   the camera's live view before playing a recording (the card says so if you
-  don't). A camera that answers **5405** (another viewer, or a session the relay
-  is still releasing) is retried twice, two seconds apart, before the card
-  reports "The camera refused to play the recording"; if it still fails, close
-  the EZVIZ app or the other live view.
+  don't). A clip that had to wait behind another download checks for a live view
+  again once it gets its turn, so it refuses with the same message instead of
+  fighting a stream someone started meanwhile. A camera that answers **5405**
+  (another viewer, or a session the relay is still releasing) is retried twice,
+  two seconds apart, before the card reports "The camera refused to play the
+  recording"; if it still fails, close the EZVIZ app or the other live view.
 - **Time zone.** The SD index is in the camera's local time. The integration
   reads it in Home Assistant's time zone, so the two should match.
 - **Encrypted cameras.** A camera with video encryption on needs its

@@ -1095,6 +1095,12 @@ async def _async_fetch(
         target = target_dir / _clip_name(key)
     started = time.monotonic()
     async with store.lock(serial):
+        # A queued request can wait here for another clip, and a live view may
+        # have started meanwhile; the camera cannot stream and read its SD card
+        # at the same time.
+        live = find_stream(hass, serial)
+        if live is not None and live.active:
+            raise RecordingError("The camera is streaming live; stop the live view first")
         ps = await hass.async_add_executor_job(
             _download_clip,
             camera.coordinator.ezviz_client,
