@@ -113,13 +113,8 @@ camera by its serial (or `entity`) and plays the integration's **own fast
 picture stream**, falling back to Home Assistant's stream only for a camera the
 integration does not stream itself.
 
-A second card, **EZVIZ Snapshot**, shows still pictures instead of video and
-can take a new one each time it comes into view; see
-[A snapshot whenever the dashboard is opened](#a-snapshot-whenever-the-dashboard-is-opened).
-A third, **EZVIZ Recordings**, lists a camera's SD-card recordings by day and
-plays the one you tap; see [Recordings on the SD card](#recordings-on-the-sd-card).
-The video card also has that list built in, behind the **filmstrip button next
-to the battery level** (see below).
+A **filmstrip button next to the battery level** opens the camera's SD-card
+recordings in the same card; see [Recordings on the SD card](#recordings-on-the-sd-card).
 
 ```yaml
 type: custom:ezviz-video-card
@@ -136,6 +131,8 @@ hide_snapshot: false   # optional; hide the snapshot chip
 show_timestamp: false  # optional; show the picture's date and time
 show_battery: true     # optional; false hides the battery level
 hide_recordings: false # optional; hide the recordings button
+format: auto           # optional; recordings format: auto, h264 or hevc
+max_height: 360        # optional; height of the recordings list in pixels
 save_recordings: true  # optional; false keeps watched clips out of media
 ```
 
@@ -155,6 +152,8 @@ save_recordings: true  # optional; false keeps watched clips out of media
 | `show_timestamp` | `false` | Show the date and time of the picture currently on the card (the motion or snapshot image, whichever `picture` selects) in the top-right corner. It disappears while a clip is playing. |
 | `show_battery` | `true` | Show the camera's charge next to the name, when the integration exposes it. `false` hides it. |
 | `hide_recordings` | `false` | Hide the recordings button (and with it the SD-card view) from this card. |
+| `format` | `auto` | The recording format the card asks for. `auto` asks for the camera's own **HEVC** when the browser says it can play it and for **H.264** otherwise; if HEVC then fails to play, it asks for H.264 once. `hevc` or `h264` force one. |
+| `max_height` | `360` | Height of the scrolling recordings list, in pixels. |
 | `save_recordings` | `true` | Keep the recordings you watch in the media folder. With `false`, a watched clip is fetched into a temporary folder, deleted after about two hours, and never appears under **Media**; one already saved earlier still plays from its permanent copy. |
 
 All of these are also in the card's **visual editor**, grouped into **Camera**,
@@ -246,12 +245,11 @@ Everything below lives under **Configure** on the integration:
 - **Release the camera after** — how long the cloud stream is held open after the
   last viewer leaves, in seconds (default **10**; `0` releases it at once). A
   short hold means a quick re-play does not wake the camera again.
-- **Snapshots** — whether the **EZVIZ Snapshot** card and the **EZVIZ Video**
-  card's `capture_on_load` may take a new picture when they come into view (*on
-  by default*), and the minimum time between those automatic pictures for one
-  camera, in seconds (default **300**; `0` takes one on every view), however many
-  dashboards ask. Buttons, the card's snapshot chip and scripts that call
-  `capture_picture` are not affected. See
+- **Snapshots** — whether the **EZVIZ Video** card's `capture_on_load` may take
+  a new picture when it comes into view (*on by default*), and the minimum time
+  between those automatic pictures for one camera, in seconds (default **300**;
+  `0` takes one on every view), however many dashboards ask. Buttons, the card's
+  snapshot chip and scripts that call `capture_picture` are not affected. See
   [Fresh pictures on demand](#fresh-pictures-on-demand).
 - **General** — request timeout and the ffmpeg arguments for cameras you added
   over local RTSP.
@@ -298,38 +296,26 @@ dashboards or automations ask. A response looks like
 
 ### A snapshot whenever the dashboard is opened
 
-The integration also ships an **EZVIZ Snapshot** card:
+The **EZVIZ Video** card's `capture_on_load` option asks for a fresh picture
+each time the card comes into view:
 
 ```yaml
-type: custom:ezviz-snapshot-card
-entity: camera.driveway_gate
-image: image.driveway_gate_snapshot  # optional; found automatically when left out
-title: Driveway gate      # optional
+type: custom:ezviz-video-card
+serial: BC1234567
 capture_on_load: true     # optional, off by default; take a picture when the card comes into view
-min_interval: 600         # optional; overrides Configure → Snapshots for this card
 ```
 
-| Option | Default | What it does |
-|---|---|---|
-| `entity` | — | The camera entity to watch (required). |
-| `image` | found automatically | The Snapshot image entity to show. Normally resolved from the camera's device; set it only if you want a specific one. |
-| `title` | camera name | The heading in the card. |
-| `capture_on_load` | `false` | Ask for a new picture each time the card comes into view. |
-| `min_interval` | Configure → Snapshots value | Override the minimum time between automatic pictures for this card. |
-
-It shows the camera's Snapshot image. As with the video card's `auto_play` and
-`capture_on_load`, this is **off by default**, so showing the card never wakes a
-battery camera unless you ask it to. With `capture_on_load: true` it asks for a
-new picture each time it comes into view: the dashboard view opens, or the
-browser tab or app comes back to the front. The **EZVIZ Video** card has the
-same option (see the table above). These automatic requests follow
+As with `auto_play`, this is **off by default**, so showing the card never wakes
+a battery camera unless you ask it to. With `capture_on_load: true` it asks for
+a new picture each time it comes into view: the dashboard view opens, or the
+browser tab or app comes back to the front. These automatic requests follow
 **Configure → Snapshots**:
 
 - **Take a snapshot when a dashboard shows the camera** — on by default; turn it
-  off and the cards only show the last picture (buttons and scripts calling
+  off and the card only shows the last picture (buttons and scripts calling
   `capture_picture` still work).
 - **Minimum time between automatic snapshots** — 300 s by default, per camera,
-  however many dashboards ask. A card can override it with `min_interval`.
+  however many dashboards ask.
 
 ### In automations and scripts
 
@@ -395,28 +381,26 @@ for the battery.
 
 A camera with a microSD card keeps its recordings there, and the EZVIZ cloud can
 both **list** them and **replay** them — the same way playback works in the
-EZVIZ app away from home. The **EZVIZ Video** card has that list built in, and
-the separate **EZVIZ Recordings** card shows just the list, for a dashboard that
-needs nothing else. Either lists one day of a camera's recordings and plays the
-one you tap, right in the card.
+EZVIZ app away from home. The **EZVIZ Video** card has that list built in: press
+the **filmstrip button next to the battery level** to switch it into the
+recordings view, and press it again to go back to the live view. It lists one
+day of a camera's recordings and plays the one you tap, right in the card.
 
-```yaml
-type: custom:ezviz-recordings-card
-entity: camera.driveway_gate   # or serial: BB1234567
-title: Driveway gate           # optional; defaults to "<camera> recordings"
-format: auto                   # optional; auto, h264 or hevc
-max_height: 360                # optional; height of the list in pixels
-save_recordings: true          # optional; false keeps watched clips out of media
-```
-
-| Option | Default | What it does |
-|---|---|---|
-| `entity` | — | The camera entity. Either this or `serial` is required. |
-| `serial` | — | The device serial instead of an entity. |
-| `title` | "*camera* recordings" | The heading in the card. |
-| `format` | `auto` | The video format the card asks for. `auto` asks for the camera's own **HEVC** when the browser says it can play it and for **H.264** otherwise; if HEVC then fails to play, it asks for H.264 once. `hevc` or `h264` force one. |
-| `max_height` | `360` | Height of the scrolling list, in pixels. |
-| `save_recordings` | `true` | Keep the recordings you watch in the media folder. With `false`, a watched clip is fetched into a temporary folder, deleted after about two hours, and never appears under **Media**. |
+- The **picture stays on screen** until a recording is picked: the camera's last
+  motion picture or snapshot, exactly as the idle card shows it. Picking a
+  recording plays it in the same media area, with the usual video controls and a
+  **✕** in the corner to go back to the picture. The recording **stays** in the
+  card until you pick another, close it or leave the mode.
+- **Live video stops** as soon as the mode opens. The camera cannot stream and
+  read its SD card at the same time, so this is what keeps playback from failing;
+  going back to the live view starts the stream again when `auto_play` is on.
+  The integration is asked to **release the cloud session at once** rather than
+  after the configured *Release the camera after* delay, so the first tap works
+  immediately — the card does not wait the 10 seconds a normal stop would.
+- The day arrows, hour grouping and the ✕ player are the card's own; the
+  recording format follows the browser (HEVC when it plays it, H.264
+  otherwise), and a failed HEVC clip is retried in H.264. The `format` and
+  `max_height` options are in the table above.
 
 ### Using it
 
@@ -445,42 +429,12 @@ save_recordings: true          # optional; false keeps watched clips out of medi
   same, is deleted after about two hours and never appears under **Media**. It
   does not get a green check, and the retention setting does not apply to it. A
   clip already saved earlier still plays from its permanent copy.
-- The list is read the first time the card is on screen, not when a dashboard
-  merely contains it; a card that leaves the screen pauses its player. A past
-  day stays cached; today's index is read again when it is more than a minute
-  old.
-
-### Recordings in the video card
-
-The **EZVIZ Video** card can show the list too, so a dashboard needs one card per
-camera instead of two. Press the **filmstrip button next to the battery level**
-to switch it into the recordings view, and press it again to go back to the live
-view.
-
-- The **picture stays on screen** until a recording is picked: the camera's last
-  motion picture or snapshot, exactly as the idle card shows it. Picking a
-  recording plays it in the same media area, with the usual video controls and a
-  **✕** in the corner to go back to the picture. The recording **stays** in the
-  card until you pick another, close it or leave the mode.
-- The **SD card is read only when the mode is opened** — the same rule as the
-  separate recordings card, because listing wakes a battery camera. **A page
-  reload (a new card) reads the day again**, and so does reopening the view when
-  today's list is more than a minute old; reopening sooner uses what is already
-  here, so toggling the view does not wake the camera every time. The ⟳ button
-  always reads the camera again, and a past day stays cached.
-- **Live video stops** as soon as the mode opens. The camera cannot stream and
-  read its SD card at the same time, so this is what keeps playback from failing;
-  going back to the live view starts the stream again when `auto_play` is on.
-  The integration is asked to **release the cloud session at once** rather than
-  after the configured *Release the camera after* delay, so the first tap works
-  immediately — the card does not wait the 10 seconds a normal stop would.
-- The day arrows, hour grouping and the ✕ player work exactly as in the
-  **EZVIZ Recordings** card; the format follows the browser (HEVC when it plays
-  it, H.264 otherwise), and a failed HEVC clip is retried in H.264.
-
-The **EZVIZ Recordings** card below remains the choice for a dashboard that only
-needs the list (it can follow one camera per card, with `format` and
-`max_height` options).
+- The **SD card is read only when the mode is opened**, because listing wakes a
+  battery camera. **A page reload (a new card) reads the day again**, and so does
+  reopening the view when today's list is more than a minute old; reopening
+  sooner uses what is already here, so toggling the view does not wake the
+  camera every time. The ⟳ button always reads the camera again, and a past day
+  stays cached. A card that leaves the screen pauses its player.
 
 ### Getting the latest recording on demand
 
@@ -733,7 +687,7 @@ Re-check it under **Configure → Verification codes**.
 </details>
 
 <details>
-<summary>The recordings card says the camera did not answer in time</summary>
+<summary>The recordings view says the camera did not answer in time</summary>
 
 The camera was asleep and didn't answer the SD search (EZVIZ error 2009); the
 integration already asked twice. Press refresh — it is usually awake by then.
@@ -741,7 +695,7 @@ integration already asked twice. Press refresh — it is usually awake by then.
 </details>
 
 <details>
-<summary>The recordings card reports a problem reading the SD card</summary>
+<summary>The recordings view reports a problem reading the SD card</summary>
 
 EZVIZ answered the search with a device exception (error 2004). Check the
 camera's storage in the EZVIZ app: the card may need formatting, or replacing.
@@ -751,9 +705,10 @@ camera's storage in the EZVIZ app: the card may need formatting, or replacing.
 <details>
 <summary>A recording won't play</summary>
 
-"The camera refused to play the recording" means another session has the
-camera — its live view in Home Assistant or the EZVIZ app. Stop that and tap
-again. If an HEVC recording stays black, set `format: h264` on the card.
+"The camera refused to play the recording" means another session still has the
+camera — its live view in Home Assistant or the EZVIZ app. The integration
+already retries twice, two seconds apart; if it still fails, stop that session
+and tap again. If an HEVC recording stays black, set `format: h264` on the card.
 
 </details>
 
@@ -774,8 +729,8 @@ This project would not exist without two upstream works; their notices are in
 - The **`capture_picture` service and Snapshot image** follow
   [RenierM26/ha-ezviz#235](https://github.com/RenierM26/ha-ezviz/pull/235) by
   **[Michael Freund (@ottes)](https://github.com/ottes)**.
-- **On-demand snapshots** — the `capture_picture` service, the Snapshot image,
-  the EZVIZ Snapshot card and the Snapshots options — were contributed by
+- **On-demand snapshots** — the `capture_picture` service, the Snapshot image
+  and the Snapshots options — were contributed by
   **[Riaz Shaik (@riazshaikgp)](https://github.com/riazshaikgp)** in
   [tarasifua/ezviz_rtsp#1](https://github.com/tarasifua/ezviz_rtsp/pull/1).
 - Brand icon: the EZVIZ brand image from

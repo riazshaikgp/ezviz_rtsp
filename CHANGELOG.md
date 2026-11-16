@@ -6,17 +6,20 @@ This project follows [Semantic Versioning](https://semver.org/).
 ## [1.7.0] — unreleased
 
 ### Added
-- **SD-card recordings.** The new **EZVIZ Recordings** card
-  (`custom:ezviz-recordings-card`) lists one day of a camera's SD-card
-  recordings, newest first, with buttons for earlier days, and plays the one you
-  tap in the card. Behind it are two websocket commands
-  (`ezviz_rtsp/recordings`, `ezviz_rtsp/recording/clip`) and an authenticated
-  MP4 view with range requests. A recording is fetched from the camera through
-  the EZVIZ cloud only when it is tapped, saved as an MP4 under Home Assistant's
-  media folder (`media/ezviz_rtsp/`, browsable under **Media → My media**), and
-  served as the camera's own HEVC to browsers that play it or as H.264 converted
-  by Home Assistant to the rest. A sleeping camera's first SD search is retried
-  once after 5 s (EZVIZ error 2009, as for `capture_picture`). See
+- **SD-card recordings.** The **filmstrip button next to the battery level**
+  switches the **EZVIZ Video** card between the live view and one day of a
+  camera's SD-card recordings, newest first, with buttons for earlier days and
+  the one you tap playing in the same media area. Behind it are two websocket
+  commands (`ezviz_rtsp/recordings`, `ezviz_rtsp/recording/clip`) and an
+  authenticated MP4 view with range requests. A recording is fetched from the
+  camera through the EZVIZ cloud only when it is tapped, saved as an MP4 under
+  Home Assistant's media folder (`media/ezviz_rtsp/`, browsable under **Media →
+  My media**), and served as the camera's own HEVC to browsers that play it or
+  as H.264 converted by Home Assistant to the rest. The current picture stays on
+  screen until a recording is picked, and live video is stopped first, so the
+  camera never streams and reads its SD card at the same time. A sleeping
+  camera's first SD search is retried once after 5 s (EZVIZ error 2009, as for
+  `capture_picture`). See
   [Recordings on the SD card](README.md#recordings-on-the-sd-card).
 - **A retention setting for downloaded recordings.** Under **Configure →
   Downloaded recordings** you choose how many days those MP4s are kept
@@ -33,22 +36,15 @@ This project follows [Semantic Versioning](https://semver.org/).
   the recording counterpart of `capture_picture`. A **Latest recording** sensor
   (`sensor.<camera>_latest_recording`) shows the file's start time, path,
   interval and format.
-- **Recordings in the video card.** The **filmstrip button next to the battery
-  level** switches the **EZVIZ Video** card between the live view and the
-  camera's SD-card recordings, so one card per camera is enough. The current
-  picture stays on screen until a recording is picked, and the clip plays in the
-  same media area. The list is read only when the mode is opened (listing wakes
-  a battery camera) and is cached until refresh; live video is stopped first, so
-  the camera never streams and reads its SD card at the same time.
 - **`show_battery`** on the video card (default `true`): set it to `false` to
   hide the camera's charge, and the filmstrip button then sits alone in the
   corner.
 - **`hide_recordings`** on the video card (default `false`): hide the filmstrip
   button for a dashboard that should not offer the SD-card view.
-- **`save_recordings`** on both cards (default `true`): with `false`, a recording
-  you watch is fetched into a temporary folder, deleted after about two hours and
-  kept out of **Media** (no green check, no retention); a clip saved earlier
-  still plays from its permanent copy.
+- **`save_recordings`** on the video card (default `true`): with `false`, a
+  recording you watch is fetched into a temporary folder, deleted after about two
+  hours and kept out of **Media** (no green check, no retention); a clip saved
+  earlier still plays from its permanent copy.
 
 ### Fixed
 - **Playing a recording right after watching live no longer fails.** The card
@@ -68,8 +64,8 @@ This project follows [Semantic Versioning](https://semver.org/).
 - **The recordings list says which clips are already local.** Each row carries a
   cloud icon while the recording still has to come from the camera's SD card and
   a green check once it is saved in `media/ezviz_rtsp/`; the icon flips as soon
-  as the clip is played. Both the video card's list and the **EZVIZ Recordings**
-  card show it.
+  as the clip is played. The recordings view of the **EZVIZ Video** card shows
+  it.
 - **The list is read again when it should be.** Opening the recordings view on a
   freshly loaded page (a new card) now asks the camera for the day instead of
   taking the server's cache, and today's list is read again when it is more than
@@ -95,6 +91,15 @@ This project follows [Semantic Versioning](https://semver.org/).
 - **The video card's editor is grouped into sections** — **Camera**,
   **Playback**, **Picture and snapshots**, **Buttons and battery** and
   **Recordings** — instead of one long list of every option.
+
+### Removed
+- **The separate EZVIZ Snapshot and EZVIZ Recordings cards.** Both are folded
+  into the **EZVIZ Video** card: `capture_on_load` takes the snapshot on view,
+  and the filmstrip button opens the SD-card recordings. The
+  `custom:ezviz-snapshot-card` and `custom:ezviz-recordings-card` types no longer
+  exist; a dashboard using one should point that card at
+  `custom:ezviz-video-card` (with `serial` or `entity`) and use
+  `capture_on_load` or the filmstrip button instead.
 
 ## [1.6.0] — 2026-11-07
 
