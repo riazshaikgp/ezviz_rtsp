@@ -884,13 +884,11 @@ class EzvizVideoCard extends HTMLElement {
 
     // Rebuilding the card replaces the list, which would otherwise bounce it to
     // the top: a clip tapped near the bottom must stay where it was while it is
-    // fetched and played.
-    const oldList = this._recordings ? root.querySelector(".recList") : null;
+    // fetched and played. The position comes from the list's own scroll events,
+    // not from reading a freshly built list (which has no layout yet).
     if (this._listScrollReset) {
       this._listScroll = 0;
       this._listScrollReset = false;
-    } else if (oldList) {
-      this._listScroll = oldList.scrollTop;
     }
 
     const card = document.createElement("ha-card");
@@ -992,8 +990,18 @@ class EzvizVideoCard extends HTMLElement {
     card.appendChild(wrap);
     root.replaceChildren(createStyle(style), card);
     if (this._recordings) {
-      const list = root.querySelector(".recList");
-      if (list) list.scrollTop = this._listScroll;
+      // Restore now and again after the browser has had a chance to lay the new
+      // list out: the first assignment is clamped when it has no scroll height
+      // yet. setTimeout keeps this working without a rAF-only code path.
+      const restore = () => {
+        const list = root.querySelector(".recList");
+        if (list) list.scrollTop = this._listScroll;
+      };
+      restore();
+      setTimeout(() => {
+        restore();
+        setTimeout(restore, 0);
+      }, 0);
     }
     this._header = { tile, primary, secondary, dot, status, battery };
     this._syncBattery();
@@ -1288,6 +1296,14 @@ class EzvizVideoCard extends HTMLElement {
     list.style.maxHeight = "360px";
     list.append(this._recordingsBody());
     view.append(list);
+    // Remember where the user is in the list; a render must not lose it.
+    list.addEventListener(
+      "scroll",
+      () => {
+        this._listScroll = list.scrollTop;
+      },
+      { passive: true }
+    );
     return view;
   }
 
