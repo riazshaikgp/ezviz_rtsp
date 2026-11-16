@@ -70,6 +70,15 @@ This project follows [Semantic Versioning](https://semver.org/).
   a green check once it is saved in `media/ezviz_rtsp/`; the icon flips as soon
   as the clip is played. Both the video card's list and the **EZVIZ Recordings**
   card show it.
+- **The list is read again when it should be.** Opening the recordings view on a
+  freshly loaded page (a new card) now asks the camera for the day instead of
+  taking the server's cache, and today's list is read again when it is more than
+  a minute old. Reopening the view sooner still uses the cached list, and ⟳
+  always re-reads.
+- **A camera busy with another viewer (EZVIZ 5405) gets a few seconds.** Playback
+  is retried twice, two seconds apart, before the card shows the error — enough
+  for the relay to release a live session the card just stopped. The message now
+  says to close the EZVIZ app or the other live view.
 
 ### Changed
 - Requires **pyezvizapi 2.5.1** (was 1.0.5.0). 2.0.0 added SD playback through

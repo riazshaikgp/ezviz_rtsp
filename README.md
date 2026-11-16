@@ -446,7 +446,9 @@ save_recordings: true          # optional; false keeps watched clips out of medi
   does not get a green check, and the retention setting does not apply to it. A
   clip already saved earlier still plays from its permanent copy.
 - The list is read the first time the card is on screen, not when a dashboard
-  merely contains it; a card that leaves the screen pauses its player.
+  merely contains it; a card that leaves the screen pauses its player. A past
+  day stays cached; today's index is read again when it is more than a minute
+  old.
 
 ### Recordings in the video card
 
@@ -461,9 +463,11 @@ view.
   **✕** in the corner to go back to the picture. The recording **stays** in the
   card until you pick another, close it or leave the mode.
 - The **SD card is read only when the mode is opened** — the same rule as the
-  separate recordings card, because listing wakes a battery camera. The list is
-  cached while the card lives, and the refresh button re-reads it. Opening the
-  mode again does not read it a second time.
+  separate recordings card, because listing wakes a battery camera. **A page
+  reload (a new card) reads the day again**, and so does reopening the view when
+  today's list is more than a minute old; reopening sooner uses what is already
+  here, so toggling the view does not wake the camera every time. The ⟳ button
+  always reads the camera again, and a past day stays cached.
 - **Live video stops** as soon as the mode opens. The camera cannot stream and
   read its SD card at the same time, so this is what keeps playback from failing;
   going back to the live view starts the stream again when `auto_play` is on.
@@ -561,8 +565,10 @@ recording is also readable from the **Media** browser under `ezviz_rtsp`.
   a few seconds of CPU per clip on a Raspberry Pi 5.
 - **One viewer at a time.** EZVIZ serves one cloud session per camera. Stop
   the camera's live view before playing a recording (the card says so if you
-  don't), and expect "The camera refused to play the recording" when the
-  EZVIZ app is watching the same camera.
+  don't). A camera that answers **5405** (another viewer, or a session the relay
+  is still releasing) is retried twice, two seconds apart, before the card
+  reports "The camera refused to play the recording"; if it still fails, close
+  the EZVIZ app or the other live view.
 - **Time zone.** The SD index is in the camera's local time. The integration
   reads it in Home Assistant's time zone, so the two should match.
 - **Encrypted cameras.** A camera with video encryption on needs its

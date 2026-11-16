@@ -603,6 +603,88 @@ async def test_a_clip_removed_from_media_is_fetched_again(hass, _cloud) -> None:
     assert path == gone and gone.exists()
 
 
+def _playback_stream(*results) -> MagicMock:
+    stream = MagicMock()
+    stream.start.side_effect = [SimpleNamespace(result=result) for result in results]
+    return stream
+
+
+def _patch_playback(monkeypatch, stream: MagicMock) -> MagicMock:
+    opener = MagicMock(return_value=stream)
+    monkeypatch.setattr(
+        "pyezvizapi.streaming.cloud.playback.open_cloud_playback_stream", opener
+    )
+    return opener
+
+
+def test_playback_negotiation_retries_while_the_camera_is_busy(monkeypatch) -> None:
+    stream = _playback_stream(
+        rec_module.BUSY_RESULT_CODE, rec_module.BUSY_RESULT_CODE, 0
+    )
+    opener = _patch_playback(monkeypatch, stream)
+    sleeps: list[float] = []
+    monkeypatch.setattr(rec_module.time, "sleep", sleeps.append)
+
+    got = rec_module._open_playback(
+        MagicMock(),
+        "BK1",
+        "20261110T080000Z",
+        "20261110T080008Z",
+        "Africa/Johannesburg",
+        time.monotonic() + 60,
+    )
+
+    assert got is stream
+    assert opener.call_count == 3
+    assert sleeps == [rec_module.PLAYBACK_RETRY_SECONDS] * 2
+    assert stream.close.call_count == 2
+
+
+def test_playback_negotiation_does_not_retry_another_refusal(monkeypatch) -> None:
+    from pyezvizapi.exceptions import EzvizPlaybackNegotiationError
+
+    stream = _playback_stream(4001)
+    opener = _patch_playback(monkeypatch, stream)
+    sleeps: list[float] = []
+    monkeypatch.setattr(rec_module.time, "sleep", sleeps.append)
+
+    with pytest.raises(EzvizPlaybackNegotiationError):
+        rec_module._open_playback(
+            MagicMock(),
+            "BK1",
+            "20261110T080000Z",
+            "20261110T080008Z",
+            "Africa/Johannesburg",
+            time.monotonic() + 60,
+        )
+
+    assert opener.call_count == 1
+    assert sleeps == []
+
+
+def test_playback_negotiation_gives_up_when_the_camera_stays_busy(monkeypatch) -> None:
+    from pyezvizapi.exceptions import EzvizPlaybackNegotiationError
+
+    stream = _playback_stream(*[rec_module.BUSY_RESULT_CODE] * rec_module.PLAYBACK_ATTEMPTS)
+    opener = _patch_playback(monkeypatch, stream)
+    sleeps: list[float] = []
+    monkeypatch.setattr(rec_module.time, "sleep", sleeps.append)
+
+    with pytest.raises(EzvizPlaybackNegotiationError) as raised:
+        rec_module._open_playback(
+            MagicMock(),
+            "BK1",
+            "20261110T080000Z",
+            "20261110T080008Z",
+            "Africa/Johannesburg",
+            time.monotonic() + 60,
+        )
+
+    assert raised.value.result_code == rec_module.BUSY_RESULT_CODE
+    assert opener.call_count == rec_module.PLAYBACK_ATTEMPTS
+    assert len(sleeps) == rec_module.PLAYBACK_ATTEMPTS - 1
+
+
 async def test_flat_clips_are_migrated_into_day_folders(hass, _cloud) -> None:
     await _setup_with_index(hass, [])
     store = await rec_module.async_get_store(hass)

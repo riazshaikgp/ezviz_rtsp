@@ -435,6 +435,7 @@ class EzvizVideoCard extends HTMLElement {
     this._listing = false;
     this._listError = "";
     this._listGen = 0;
+    this._listAt = 0; // when the list was last read (for today's freshness)
     this._selected = null; // the recording in the media area
     this._clipState = "idle"; // idle | fetching | playing | error
     this._clipError = "";
@@ -477,6 +478,7 @@ class EzvizVideoCard extends HTMLElement {
     if (previous && was !== now) {
       this._closeClip();
       this._list = null;
+      this._listAt = 0;
       this._day = null;
       this._today = null;
       this._listError = "";
@@ -1120,7 +1122,13 @@ class EzvizVideoCard extends HTMLElement {
     if (!this._recordings) return;
     await this._stopLive();
     if (!this._recordings) return;
-    this._loadRecordings();
+    // A freshly loaded page (a new card) reads the day from the SD card again,
+    // and so does reopening the view when today's list is over a minute old.
+    // Anything else uses what is already here, so toggling does not wake the
+    // camera; ⟳ always re-reads.
+    const today = !this._day || this._day === this._today;
+    const stale = !this._list || (today && Date.now() - this._listAt > 60000);
+    this._loadRecordings(stale);
   }
 
   // The card dropping its picture is not enough: the integration keeps the
@@ -1163,6 +1171,7 @@ class EzvizVideoCard extends HTMLElement {
       const result = await this._hass.callWS(msg);
       if (gen !== this._listGen || !this._recordings) return;
       this._list = result;
+      this._listAt = Date.now();
       this._today = result.today;
       this._day = result.date;
     } catch (err) {

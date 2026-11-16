@@ -80,6 +80,13 @@ CLIP_IDLE = 4.0
 # The socket's own timeout must outlast a camera waking up.
 CLIP_SOCKET_TIMEOUT = 30.0
 CLIP_MAX_BYTES = 96 * 1024 * 1024
+# EZVIZ answers a playback request with 5405 while another viewer holds the
+# camera: the app, a live view, or a session the relay is still releasing. The
+# relay usually lets go a moment later, so a couple of attempts save the user a
+# needless "try again".
+BUSY_RESULT_CODE = 5405
+PLAYBACK_ATTEMPTS = 3
+PLAYBACK_RETRY_SECONDS = 2.0
 # A recording longer than this is not a clip; refuse it rather than stream an hour.
 MAX_CLIP_SECONDS = 15 * 60
 _FFMPEG_TIMEOUT = 120
@@ -536,26 +543,21 @@ def parse_stamp(value: str) -> datetime:
         raise RecordingError(f"Not a recording time: {value!r}") from err
 
 
-def _download_clip(
-    client: Any, serial: str, begin: str, end: str, timezone: str, code: str | None
-) -> bytes:
-    """One SD interval as MPEG-PS through the cloud relay. Blocking.
+def _open_playback(
+    client: Any, serial: str, begin: str, end: str, timezone: str, deadline: float
+) -> Any:
+    """Open the SD playback stream, waiting out a camera that is busy (5405).
 
-    pyezvizapi's own ``save_clip`` refuses a clip whose video falls a fraction
-    of a second short of the requested range (the camera often closes the file
-    early), so this reads the relay directly and keeps whatever arrived.
+    EZVIZ answers a request with 5405 while another viewer holds the camera, and
+    the relay takes a moment to let go after that session ends — most often the
+    live view the card just stopped. Retrying a couple of times turns that into
+    a short wait instead of an error the user has to act on.
     """
-    from pyezvizapi.exceptions import EzvizPlaybackNegotiationError, PyEzvizError
+    from pyezvizapi.exceptions import EzvizPlaybackNegotiationError
     from pyezvizapi.streaming.cloud.playback import open_cloud_playback_stream
-    from pyezvizapi.streaming.cloud.protocol import (
-        VtmStreamEOF,
-        VtmStreamTimeout,
-        decrypt_hikvision_ps_video,
-    )
 
-    deadline = time.monotonic() + CLIP_DEADLINE
-    data = bytearray()
-    try:
+    last: EzvizPlaybackNegotiationError | None = None
+    for attempt in range(1, PLAYBACK_ATTEMPTS + 1):
         stream = open_cloud_playback_stream(
             client,
             serial,
@@ -568,9 +570,49 @@ def _download_clip(
         )
         try:
             info = stream.start(deadline=deadline)
-            if info.result not in (None, 0):
-                raise EzvizPlaybackNegotiationError(info.result)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                stream.close()
+            raise
+        if info.result in (None, 0):
+            return stream
+        last = EzvizPlaybackNegotiationError(info.result)
+        with contextlib.suppress(OSError):
+            stream.close()
+        if info.result != BUSY_RESULT_CODE or attempt >= PLAYBACK_ATTEMPTS:
+            break
+        _LOGGER.debug(
+            "Camera %s is busy with another viewer (code %s); retrying in %.0f s",
+            serial,
+            info.result,
+            PLAYBACK_RETRY_SECONDS,
+        )
+        time.sleep(PLAYBACK_RETRY_SECONDS)
+    assert last is not None
+    raise last
 
+
+def _download_clip(
+    client: Any, serial: str, begin: str, end: str, timezone: str, code: str | None
+) -> bytes:
+    """One SD interval as MPEG-PS through the cloud relay. Blocking.
+
+    pyezvizapi's own ``save_clip`` refuses a clip whose video falls a fraction
+    of a second short of the requested range (the camera often closes the file
+    early), so this reads the relay directly and keeps whatever arrived.
+    """
+    from pyezvizapi.exceptions import EzvizPlaybackNegotiationError, PyEzvizError
+    from pyezvizapi.streaming.cloud.protocol import (
+        VtmStreamEOF,
+        VtmStreamTimeout,
+        decrypt_hikvision_ps_video,
+    )
+
+    deadline = time.monotonic() + CLIP_DEADLINE
+    data = bytearray()
+    try:
+        stream = _open_playback(client, serial, begin, end, timezone, deadline)
+        try:
             def _take(**limits: Any) -> int:
                 taken = 0
                 for packet in stream.iter_packets(
@@ -604,7 +646,8 @@ def _download_clip(
     except EzvizPlaybackNegotiationError as err:
         raise RecordingError(
             f"The camera refused to play the recording (code {err.result_code}); "
-            "it may be busy with another viewer. Try again."
+            "it is busy with another viewer. Close the EZVIZ app or the live view "
+            "elsewhere, then try again."
         ) from err
     except (PyEzvizError, OSError) as err:
         if isinstance(err, RecordingError):
