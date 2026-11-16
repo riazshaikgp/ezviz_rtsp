@@ -459,9 +459,11 @@ day of a camera's recordings and plays the one you tap, right in the card.
   sooner uses what is already here, so toggling the view does not wake the
   camera every time. The calendar's month dots are read from the cache and the
   media folder until you press **Check the SD card for this month**, which is
-  the only part that asks the camera. The ⟳ button always reads the camera
-  again, and a past day stays cached. A card that leaves the screen pauses its
-  player.
+  the only part that asks the camera. Switching days quickly shares the read
+  already on its way instead of starting another camera session for every tap,
+  so a burst of taps cannot make the camera answer **2004**. The ⟳ button
+  always reads the camera again, and a past day stays cached. A card that
+  leaves the screen pauses its player.
 
 ### Getting the latest recording on demand
 

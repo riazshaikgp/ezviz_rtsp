@@ -6,6 +6,7 @@ import asyncio
 import base64
 import json
 import os
+import threading
 import time
 import zlib
 from contextlib import contextmanager
@@ -387,6 +388,55 @@ async def test_list_marks_a_short_saved_copy_as_incomplete(
     updated = (await ws.receive_json())["result"]["recordings"][0]
     assert updated["local"] is True
     assert updated["incomplete"] is True
+
+
+async def test_two_reads_of_one_day_share_one_sd_session(hass, _cloud) -> None:
+    """Switching days quickly must not queue a camera session per tap."""
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    tz = ZoneInfo("Africa/Johannesburg")
+    day = datetime.now(tz).date() - timedelta(days=1)
+    start = datetime.combine(day, datetime.min.time()) + timedelta(hours=8)
+    entry, index = await _setup_with_index(hass, [start])
+    camera = rec_module.find_camera(hass, "BK1")
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def gated(serial, channel, begin, end, *, size):
+        entered.set()
+        assert release.wait(5)
+        return index.search_records_v2(serial, channel, begin, end, size=size)
+
+    entry.runtime_data.ezviz_client.search_records_v2 = gated
+    first = asyncio.create_task(rec_module.async_list_day(hass, camera, day))
+    assert await hass.async_add_executor_job(entered.wait, 5)
+    second = asyncio.create_task(rec_module.async_list_day(hass, camera, day))
+    await asyncio.sleep(0)
+    assert not second.done(), "the second read waits on the one already in flight"
+    await hass.async_add_executor_job(release.set)
+    one, two = await first, await second
+
+    assert one == two
+    assert len(index.calls) == 1, "the camera was asked once, not once per tap"
+    assert not (await rec_module.async_get_store(hass)).day_tasks
+
+
+async def test_a_failed_shared_read_can_be_tried_again(hass, _cloud) -> None:
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    tz = ZoneInfo("Africa/Johannesburg")
+    day = datetime.now(tz).date() - timedelta(days=1)
+    entry, index = await _setup_with_index(hass, [])
+    camera = rec_module.find_camera(hass, "BK1")
+    def fail(*args, **kwargs):
+        raise PyEzvizError("2004")
+
+    entry.runtime_data.ezviz_client.search_records_v2 = fail
+    with pytest.raises(rec_module.RecordingError, match="problem reading"):
+        await rec_module.async_list_day(hass, camera, day)
+    # The failed read is forgotten, so the next attempt reaches the camera.
+    entry.runtime_data.ezviz_client.search_records_v2 = index.search_records_v2
+    recordings, complete = await rec_module.async_list_day(hass, camera, day)
+    assert recordings == [] and complete
 
 
 async def test_websocket_keeps_a_watched_clip_out_of_media_when_asked(

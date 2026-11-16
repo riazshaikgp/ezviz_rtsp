@@ -146,8 +146,13 @@ class RecordingStore:
     short: set[tuple[str, str, str, str]] = field(default_factory=set)
     # Days whose SD list this run has seen with recordings, for the calendar.
     seen: set[tuple[str, date]] = field(default_factory=set)
-    # One SD request per camera at a time: EZVIZ refuses parallel sessions.
+    # One SD session per camera at a time: EZVIZ refuses parallel sessions.
     locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+    # Reads of one day already on their way: a card that switches days quickly
+    # (or a second card) joins the read instead of queueing a session of its own.
+    day_tasks: dict[
+        tuple[str, date], asyncio.Task[tuple[list[tuple[datetime, datetime]], bool]]
+    ] = field(default_factory=dict)
 
     def lock(self, serial: str) -> asyncio.Lock:
         """The lock that serialises SD requests to one camera."""
@@ -643,11 +648,47 @@ async def async_list_day(
             return cached.recordings, cached.complete
     if day > now.date():
         return [], True
+    # Switching days quickly used to queue one SD session per tap behind the
+    # camera lock, and the camera answered 2004 after a few. Everyone waiting
+    # for the same day shares the read that is already on its way.
+    task = store.day_tasks.get(key)
+    if task is not None and task.done():
+        # It finished before its callback cleared the map: do not hand a stale
+        # result (or a stale error) to the caller, start a fresh read.
+        store.day_tasks.pop(key, None)
+        task = None
+    if task is None:
+        task = hass.async_create_task(
+            _read_day(hass, store, camera, day, tz, now),
+            f"ezviz_rtsp read {camera.serial} {day}",
+        )
+        store.day_tasks[key] = task
+
+        def _forget(finished: asyncio.Task, key: tuple[str, date] = key) -> None:
+            if store.day_tasks.get(key) is finished:
+                store.day_tasks.pop(key, None)
+            # No one is left to take the error when every waiter went away.
+            with contextlib.suppress(BaseException):
+                finished.exception()
+
+        task.add_done_callback(_forget)
+    return await asyncio.shield(task)
+
+
+async def _read_day(
+    hass: HomeAssistant,
+    store: RecordingStore,
+    camera: Camera,
+    day: date,
+    tz: ZoneInfo,
+    now: datetime,
+) -> tuple[list[tuple[datetime, datetime]], bool]:
+    """Read one local day from the SD card and cache it. Runs as a shared task."""
     async with store.lock(camera.serial):
         recordings, complete = await hass.async_add_executor_job(
             search_day, camera.coordinator.ezviz_client, camera.serial, day, tz, now
         )
-    store.days[key] = _Day(recordings, time.monotonic(), complete)
+    store.days[(camera.serial, day)] = _Day(recordings, time.monotonic(), complete)
     if recordings:
         store.seen.add((camera.serial, day))
     return recordings, complete

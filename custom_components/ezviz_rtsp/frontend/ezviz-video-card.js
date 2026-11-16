@@ -520,6 +520,7 @@ class EzvizVideoCard extends HTMLElement {
     this._listing = false;
     this._listError = "";
     this._listGen = 0;
+    this._reads = new Map(); // day reads on their way, shared by quick switches
     this._listAt = 0; // when the list was last read (for today's freshness)
     this._listScroll = 0; // where the recordings list was scrolled to
     this._listScrollReset = false; // a day change or refresh starts at the top
@@ -581,6 +582,7 @@ class EzvizVideoCard extends HTMLElement {
       this._day = null;
       this._today = null;
       this._listError = "";
+      this._reads.clear(); // another camera: its reads are not ours
       this._calendarOpen = false;
       this._calendarMonth = null;
       this._days = {};
@@ -1301,10 +1303,26 @@ class EzvizVideoCard extends HTMLElement {
     this._listing = true;
     this._listError = "";
     this._render();
-    try {
+    // One SD read per camera and day at a time. Tapping today, another day and
+    // today again used to queue a camera session for every tap (the camera
+    // answered 2004 after a few); a repeat now joins the read already on its
+    // way. The day the server will use stands in for "today" until it tells us.
+    const readDay = this._day || this._today || localDay(new Date());
+    const readKey = `${serial}|${readDay}`;
+    let read = this._reads.get(readKey);
+    if (!read) {
       const msg = { type: "ezviz_rtsp/recordings", serial, refresh };
       if (this._day) msg.date = this._day;
-      const result = await this._hass.callWS(msg);
+      read = this._hass.callWS(msg);
+      this._reads.set(readKey, read);
+      read
+        .catch(() => {}) // the awaiters below report the error
+        .finally(() => {
+          if (this._reads.get(readKey) === read) this._reads.delete(readKey);
+        });
+    }
+    try {
+      const result = await read;
       if (gen !== this._listGen || !this._recordings) return;
       this._list = result;
       this._listAt = Date.now();
