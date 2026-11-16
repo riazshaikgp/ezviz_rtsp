@@ -29,7 +29,8 @@ looking at it. When a still is enough, it can also have the camera take a
 fresh picture on demand, or whenever a dashboard shows it (see
 [Fresh pictures on demand](#fresh-pictures-on-demand)).
 With an SD card in the camera, it can also list and play back the camera's
-recordings (see [Recordings on the SD card](#recordings-on-the-sd-card)).
+recordings, from the card itself or from a card of their own (see
+[Recordings on the SD card](#recordings-on-the-sd-card)).
 
 It is a fork of the **built-in** EZVIZ integration, so everything that one
 does still works here. It lives under its own domain, `ezviz_rtsp`, which means
@@ -117,6 +118,8 @@ can take a new one each time it comes into view; see
 [A snapshot whenever the dashboard is opened](#a-snapshot-whenever-the-dashboard-is-opened).
 A third, **EZVIZ Recordings**, lists a camera's SD-card recordings by day and
 plays the one you tap; see [Recordings on the SD card](#recordings-on-the-sd-card).
+The video card also has that list built in, behind the **filmstrip button next
+to the battery level** (see below).
 
 ```yaml
 type: custom:ezviz-video-card
@@ -131,6 +134,7 @@ hide_play: false       # optional; hide the play chip
 hide_stop: false       # optional; hide the stop chip
 hide_snapshot: false   # optional; hide the snapshot chip
 show_timestamp: false  # optional; show the picture's date and time
+show_battery: true     # optional; false hides the battery level
 ```
 
 | Option | Default | What it does |
@@ -147,6 +151,7 @@ show_timestamp: false  # optional; show the picture's date and time
 | `hide_stop` | `false` | Hide the stop chip while a clip is playing. |
 | `hide_snapshot` | `false` | Hide the card's snapshot chip. |
 | `show_timestamp` | `false` | Show the date and time of the picture currently on the card (the motion or snapshot image, whichever `picture` selects) in the top-right corner. It disappears while a clip is playing. |
+| `show_battery` | `true` | Show the camera's charge next to the name, when the integration exposes it. `false` hides it. |
 
 All of these are also in the card's **visual editor**, which lists your cameras
 and exposes the picture and button options. By default the card does nothing
@@ -174,7 +179,10 @@ instead starts a clip by itself when it appears. An idle card never wakes the
 camera.
 
 A **battery camera's charge** is shown in the top-right corner, opposite the
-camera name, when the integration exposes it.
+camera name, when the integration exposes it; `show_battery: false` hides it.
+Directly to its left is the **filmstrip button**, which switches the card to the
+camera's SD-card recordings (see
+[Recordings in the video card](#recordings-in-the-video-card)).
 
 The card shows the picture through the integration's **own fast picture stream**
 (a live MJPEG) so it appears a few seconds after the camera wakes, rather than
@@ -380,9 +388,10 @@ for the battery.
 
 A camera with a microSD card keeps its recordings there, and the EZVIZ cloud can
 both **list** them and **replay** them — the same way playback works in the
-EZVIZ app away from home. The **EZVIZ Recordings** card brings that into Home
-Assistant: it lists one day of a camera's recordings and plays the one you tap,
-right in the card.
+EZVIZ app away from home. The **EZVIZ Video** card has that list built in, and
+the separate **EZVIZ Recordings** card shows just the list, for a dashboard that
+needs nothing else. Either lists one day of a camera's recordings and plays the
+one you tap, right in the card.
 
 ```yaml
 type: custom:ezviz-recordings-card
@@ -413,6 +422,33 @@ max_height: 360                # optional; height of the list in pixels
   while the clip is on its way.
 - The list is read the first time the card is on screen, not when a dashboard
   merely contains it; a card that leaves the screen pauses its player.
+
+### Recordings in the video card
+
+The **EZVIZ Video** card can show the list too, so a dashboard needs one card per
+camera instead of two. Press the **filmstrip button next to the battery level**
+to switch it into the recordings view, and press it again to go back to the live
+view.
+
+- The **picture stays on screen** until a recording is picked: the camera's last
+  motion picture or snapshot, exactly as the idle card shows it. Picking a
+  recording plays it in the same media area, with the usual video controls and a
+  **✕** in the corner to go back to the picture. The recording **stays** in the
+  card until you pick another, close it or leave the mode.
+- The **SD card is read only when the mode is opened** — the same rule as the
+  separate recordings card, because listing wakes a battery camera. The list is
+  cached while the card lives, and the refresh button re-reads it. Opening the
+  mode again does not read it a second time.
+- **Live video stops** as soon as the mode opens. The camera cannot stream and
+  read its SD card at the same time, so this is what keeps playback from failing;
+  going back to the live view starts the stream again when `auto_play` is on.
+- The day arrows, hour grouping and the ✕ player work exactly as in the
+  **EZVIZ Recordings** card; the format follows the browser (HEVC when it plays
+  it, H.264 otherwise), and a failed HEVC clip is retried in H.264.
+
+The **EZVIZ Recordings** card below remains the choice for a dashboard that only
+needs the list (it can follow one camera per card, with `format` and
+`max_height` options).
 
 ### Getting the latest recording on demand
 

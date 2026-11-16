@@ -15,6 +15,7 @@
 //   hide_stop: false       # optional; hide the stop chip
 //   hide_snapshot: false   # optional; hide the snapshot chip
 //   show_timestamp: false  # optional; show the picture's date and time
+//   show_battery: true     # optional; false hides the battery level
 //
 // The card shows the camera's live picture from the integration's own stream:
 // its fast MJPEG path (an <img> that appears a few seconds after the camera
@@ -23,6 +24,13 @@
 // of the picture — but needs neither Mushroom nor any other frontend dependency.
 // hls.js is bundled with the integration and served from its own path, so no
 // code is ever loaded from a CDN.
+//
+// The filmstrip button next to the battery level switches the card to the
+// camera's SD-card recordings: the current picture stays on screen until a
+// recording is picked, then plays it in the same media area. The list is read
+// only when the mode is opened (listing wakes a battery camera), and the live
+// view is stopped first — the camera cannot stream and read its SD card at the
+// same time. Press the button again to go back to the live view.
 //
 // To keep a battery camera asleep, the card stops the stream whenever it is not
 // on screen (another dashboard view, another browser tab, scrolled away) or
@@ -100,6 +108,10 @@ const STRINGS = /* translations */ {
     "hide_stop": "Hide the stop button",
     "hide_snapshot": "Hide the snapshot button",
     "show_timestamp": "Show the picture date and time",
+    "show_battery": "Show the battery level",
+    "recordings": "Recordings",
+    "recordings_show": "Show the camera's recordings",
+    "recordings_hide": "Back to the live view",
     "rec_title": "{name} recordings",
     "rec_today": "Today",
     "rec_yesterday": "Yesterday",
@@ -142,6 +154,10 @@ const STRINGS = /* translations */ {
     "hide_stop": "Приховати кнопку зупинки",
     "hide_snapshot": "Приховати кнопку снапшота",
     "show_timestamp": "Показувати дату й час знімка",
+    "show_battery": "Показувати заряд батареї",
+    "recordings": "Записи",
+    "recordings_show": "Показати записи камери",
+    "recordings_hide": "Повернутися до живого відео",
     "rec_title": "Записи: {name}",
     "rec_today": "Сьогодні",
     "rec_yesterday": "Вчора",
@@ -182,6 +198,7 @@ const CARD_DEFAULTS = {
   hide_stop: false,
   hide_snapshot: false,
   show_timestamp: false,
+  show_battery: true,
 };
 
 const style = /* css */ `
@@ -218,6 +235,19 @@ const style = /* css */ `
     color: var(--secondary-text-color); --mdc-icon-size: 20px;
   }
   .battery.low { color: var(--error-color, #db4437); }
+  .tools { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
+  .toggle {
+    flex: 0 0 auto;
+    width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--secondary-text-color); background: none; cursor: pointer;
+    --mdc-icon-size: 20px;
+  }
+  .toggle:hover { background: color-mix(in srgb, var(--primary-text-color) 8%, transparent); }
+  .toggle.on {
+    color: var(--primary-color);
+    background: color-mix(in srgb, var(--primary-color) 16%, transparent);
+  }
   .dot {
     width: 8px; height: 8px; border-radius: 50%;
     background: var(--secondary-text-color); flex: 0 0 auto;
@@ -280,6 +310,56 @@ const style = /* css */ `
     backdrop-filter: blur(4px); pointer-events: none;
   }
 
+  /* SD-card recordings, shown under the picture while the mode is on. */
+  .rec { display: flex; flex-direction: column; gap: 8px; }
+  .recBar { display: flex; align-items: center; gap: 8px; }
+  .recDay {
+    flex: 1 1 auto; min-width: 0;
+    font-size: 12px; line-height: 16px; color: var(--secondary-text-color);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .days { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
+  .iconbtn {
+    width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--secondary-text-color); background: none; cursor: pointer;
+    --mdc-icon-size: 20px;
+  }
+  .iconbtn:hover:not([disabled]) {
+    background: color-mix(in srgb, var(--primary-text-color) 8%, transparent);
+  }
+  .iconbtn[disabled] { opacity: 0.35; cursor: default; }
+  .iconbtn.spinning ha-icon { animation: spin 900ms linear infinite; }
+  .media .recClose {
+    position: absolute; top: 8px; right: 8px; z-index: 3;
+    width: 30px; height: 30px; color: #fff;
+    background: color-mix(in srgb, #000 55%, transparent);
+  }
+  .recList {
+    overflow-y: auto; border-radius: 12px;
+    border: 1px solid var(--divider-color, rgba(127,127,127,.25));
+  }
+  .recHour {
+    position: sticky; top: 0; z-index: 1;
+    font-size: 11px; font-weight: 500; letter-spacing: .04em;
+    padding: 4px 12px; color: var(--secondary-text-color);
+    background: var(--ha-card-background, var(--card-background-color, #fff));
+    border-bottom: 1px solid var(--divider-color, rgba(127,127,127,.2));
+  }
+  .recRow {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 8px 12px; border: 0; background: none; cursor: pointer;
+    font: inherit; font-size: 14px; color: var(--primary-text-color); text-align: left;
+  }
+  .recRow + .recRow { border-top: 1px solid var(--divider-color, rgba(127,127,127,.12)); }
+  .recRow:hover { background: color-mix(in srgb, var(--primary-color) 8%, transparent); }
+  .recRow.on { background: color-mix(in srgb, var(--primary-color) 16%, transparent); }
+  .recRow ha-icon { --mdc-icon-size: 18px; color: var(--primary-color); flex: 0 0 auto; }
+  .recRow .time { font-variant-numeric: tabular-nums; flex: 1 1 auto; }
+  .recRow .len { font-size: 12px; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; }
+  .recNote { padding: 16px 12px; text-align: center; font-size: 13px; color: var(--secondary-text-color); }
+  .recNote.error { color: var(--error-color, #db4437); }
+
   .spinner {
     position: absolute; right: 10px; bottom: 10px; z-index: 2;
     width: 26px; height: 26px; border-radius: 50%;
@@ -318,6 +398,23 @@ class EzvizVideoCard extends HTMLElement {
     this._posterShown = undefined;
     this._posterEl = null;
     this._whenEl = null;
+
+    // SD-card recordings mode: the list replaces the live view until the button
+    // is pressed again. It is read only when the mode is opened (listing wakes
+    // a battery camera), and the live stream is stopped first.
+    this._recordings = false;
+    this._day = null; // YYYY-MM-DD; null = today (as the server sees it)
+    this._today = null;
+    this._list = null; // { recordings, complete, date }
+    this._listing = false;
+    this._listError = "";
+    this._listGen = 0;
+    this._selected = null; // the recording in the media area
+    this._clipState = "idle"; // idle | fetching | playing | error
+    this._clipError = "";
+    this._clipFormat = "";
+    this._clipGen = 0;
+    this._clipVideo = null;
   }
 
   static getStubConfig() {
@@ -332,6 +429,7 @@ class EzvizVideoCard extends HTMLElement {
     if (!config || (!config.serial && !config.entity)) {
       throw new Error("ezviz-video-card: 'serial' (or 'entity') is required");
     }
+    const previous = this._config;
     // Play, snapshots and waking the camera are all off by default: the card
     // shows the camera's last picture and waits for a tap, so opening the
     // dashboard never wakes a battery camera.
@@ -341,6 +439,16 @@ class EzvizVideoCard extends HTMLElement {
     this._imagesFrom = undefined;
     this._imagesCam = undefined;
     this._posterShown = undefined;
+    // Another camera means another SD card: forget the list and the clip.
+    const was = `${previous?.serial || ""}|${previous?.entity || ""}`;
+    const now = `${this._config.serial || ""}|${this._config.entity || ""}`;
+    if (previous && was !== now) {
+      this._closeClip();
+      this._list = null;
+      this._day = null;
+      this._today = null;
+      this._listError = "";
+    }
     this._stop();
     this._state = "idle";
     this._message = "";
@@ -381,6 +489,7 @@ class EzvizVideoCard extends HTMLElement {
       if (this.isConnected) return;
       this._unwatchVisibility();
       this._visible = false;
+      this._clipVideo?.pause();
       this._stop(true);
     });
   }
@@ -450,12 +559,16 @@ class EzvizVideoCard extends HTMLElement {
 
   _onHidden() {
     // Off screen means nobody is watching: stop the stream for good (a battery
-    // camera must not be left streaming).
+    // camera must not be left streaming). A SD-card clip is only paused; it
+    // never wakes the camera by itself.
+    this._clipVideo?.pause();
+    if (this._recordings) return;
     if (this._state !== "playing" && this._state !== "loading") return;
     this._stop(true);
   }
 
   _onShown() {
+    if (this._recordings) return;
     this._maybeCapture();
     this._ensurePlaying();
   }
@@ -465,7 +578,7 @@ class EzvizVideoCard extends HTMLElement {
   // server keeps the minimum time between pictures per camera — several open
   // dashboards still wake a camera only once per interval.
   async _maybeCapture() {
-    if (!this._config?.capture_on_load || this._capturing || !this._hass) return;
+    if (this._recordings || !this._config?.capture_on_load || this._capturing || !this._hass) return;
     const entity = this._entityId();
     if (!entity) return;
     const cam = this._hass.states[entity];
@@ -486,7 +599,7 @@ class EzvizVideoCard extends HTMLElement {
   }
 
   _ensurePlaying() {
-    if (this._userPaused || this._state !== "playing" || !this._started) return;
+    if (this._recordings || this._userPaused || this._state !== "playing" || !this._started) return;
     const video = this._video;
     if (video && video.paused) video.play().catch(() => {});
   }
@@ -658,15 +771,21 @@ class EzvizVideoCard extends HTMLElement {
     });
   }
 
+  // Whether the media area is showing video (the live stream or an SD-card
+  // clip) rather than a still picture.
+  _showingVideo() {
+    return this._recordings ? this._clipState === "playing" : this._state === "playing";
+  }
+
   _syncWhen() {
     if (!this._config) return;
-    const text = this._state === "playing" ? "" : this._whenText();
+    const text = this._showingVideo() ? "" : this._whenText();
     if (this._whenEl) {
       this._whenEl.textContent = text;
       this._whenEl.hidden = !text;
       return;
     }
-    if (text && this._media && this._state !== "playing") {
+    if (text && this._media && !this._showingVideo()) {
       this._whenEl = document.createElement("div");
       this._whenEl.className = "when";
       this._whenEl.textContent = text;
@@ -696,6 +815,11 @@ class EzvizVideoCard extends HTMLElement {
   _syncBattery() {
     const el = this._header?.battery;
     if (!el) return;
+    if (!this._config?.show_battery) {
+      el.replaceChildren();
+      el.hidden = true;
+      return;
+    }
     const level = this._batteryLevel();
     if (level === null) {
       el.replaceChildren();
@@ -740,16 +864,21 @@ class EzvizVideoCard extends HTMLElement {
     const secondary = document.createElement("div");
     secondary.className = "secondary";
     const dot = document.createElement("span");
-    dot.className = "dot" + (this._started ? " on" : "");
+    dot.className = "dot" + (this._started && !this._recordings ? " on" : "");
+    // The dot says "the camera is streaming"; the recordings mode is not live.
+    if (this._recordings) dot.hidden = true;
     const status = document.createElement("span");
-    status.textContent = this._statusText();
+    status.textContent = this._recordings ? t(this._lang, "recordings") : this._statusText();
     secondary.append(dot, status);
     info.append(primary, secondary);
 
-    // Charge of a battery camera / peephole, opposite the name.
+    // The recordings toggle sits next to the battery level, opposite the name.
     const battery = document.createElement("div");
     battery.className = "battery";
-    header.append(tile, info, battery);
+    const tools = document.createElement("div");
+    tools.className = "tools";
+    tools.append(this._recordingsButton(), battery);
+    header.append(tile, info, tools);
 
     // Media
     const media = document.createElement("div");
@@ -769,7 +898,11 @@ class EzvizVideoCard extends HTMLElement {
 
     this._snapshotChipEl = null;
     this._whenEl = null;
-    if (this._state === "playing" && this._video) {
+    if (this._recordings) {
+      // The picture above stays until a recording is picked; then it plays in
+      // the same place, with a ✕ to go back to the picture.
+      this._renderRecordingMedia(media);
+    } else if (this._state === "playing" && this._video) {
       media.appendChild(this._video); // re-attach the running element
       if (!this._config.hide_stop) media.appendChild(this._stopChip());
       if (!this._config.hide_snapshot) media.appendChild(this._snapshotChip());
@@ -794,7 +927,7 @@ class EzvizVideoCard extends HTMLElement {
 
     // The picture's own date and time, over the top-right corner. Hidden while
     // a clip is playing (the live view is now, not a still).
-    const when = this._state === "playing" ? "" : this._whenText();
+    const when = this._showingVideo() ? "" : this._whenText();
     if (when) {
       this._whenEl = document.createElement("div");
       this._whenEl.className = "when";
@@ -803,6 +936,7 @@ class EzvizVideoCard extends HTMLElement {
     }
 
     wrap.append(header, media);
+    if (this._recordings) wrap.append(this._recordingsView());
     card.appendChild(wrap);
     root.replaceChildren(createStyle(style), card);
     this._header = { tile, primary, secondary, dot, status, battery };
@@ -900,11 +1034,370 @@ class EzvizVideoCard extends HTMLElement {
     }
   }
 
+  // -- SD-card recordings --------------------------------------------------
+  //
+  // The button next to the battery level switches the card between the live
+  // view and the camera's SD-card recordings. The picture stays on screen until
+  // a recording is picked; the list is read only when the mode is opened (a
+  // listing wakes a battery camera), and the live stream is stopped first,
+  // because the camera cannot stream and read its SD card at the same time.
+
+  _recordingsButton() {
+    const button = document.createElement("button");
+    button.className = "toggle" + (this._recordings ? " on" : "");
+    const title = t(this._lang, this._recordings ? "recordings_hide" : "recordings_show");
+    button.title = title;
+    button.setAttribute("aria-label", title);
+    button.setAttribute("aria-pressed", this._recordings ? "true" : "false");
+    const icon = document.createElement("ha-icon");
+    icon.setAttribute("icon", "mdi:filmstrip-box-multiple");
+    button.appendChild(icon);
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this._toggleRecordings();
+    });
+    return button;
+  }
+
+  _toggleRecordings() {
+    if (this._recordings) {
+      // Back to the live view: drop the clip and let auto_play take over.
+      this._closeClip();
+      this._recordings = false;
+      this._state = "idle";
+      this._message = "";
+      this._render();
+      this._maybeAutoPlay();
+      return;
+    }
+    // One viewer at a time: reading the SD card while a live stream is open
+    // makes EZVIZ fail both, so stop the stream before the list is requested.
+    this._stop();
+    this._recordings = true;
+    this._state = "idle";
+    this._message = "";
+    this._render();
+    this._loadRecordings();
+  }
+
+  _serial() {
+    return this._config?.serial || this._findDevice()?.serial || null;
+  }
+
+  async _loadRecordings(refresh = false) {
+    if (!this._recordings || !this._hass) return;
+    // The list is cached while the card lives; the refresh button re-reads it.
+    if (this._list && !refresh) return;
+    await this._loadDevices();
+    if (!this._recordings) return;
+    const serial = this._serial();
+    if (!serial) {
+      this._list = null;
+      this._listError = t(this._lang, "no_entity");
+      this._render();
+      return;
+    }
+    const gen = ++this._listGen;
+    this._listing = true;
+    this._listError = "";
+    this._render();
+    try {
+      const msg = { type: "ezviz_rtsp/recordings", serial, refresh };
+      if (this._day) msg.date = this._day;
+      const result = await this._hass.callWS(msg);
+      if (gen !== this._listGen || !this._recordings) return;
+      this._list = result;
+      this._today = result.today;
+      this._day = result.date;
+    } catch (err) {
+      if (gen !== this._listGen) return;
+      this._list = null;
+      this._listError = err?.message || String(err);
+    } finally {
+      if (gen === this._listGen) {
+        this._listing = false;
+        this._render();
+      }
+    }
+  }
+
+  _shiftDay(days) {
+    const base = this._day || this._today || localDay(new Date());
+    const [y, m, d] = base.split("-").map(Number);
+    const next = localDay(new Date(y, m - 1, d + days));
+    if (this._today && next > this._today) return;
+    if (this._selected) this._closeClip();
+    this._day = next;
+    this._list = null;
+    this._loadRecordings();
+  }
+
+  _atToday() {
+    return !this._today || (this._day || this._today) >= this._today;
+  }
+
+  _dayLabel() {
+    const day = this._day || this._today;
+    if (!day) return "";
+    if (day === this._today) return t(this._lang, "rec_today");
+    const [y, m, d] = day.split("-").map(Number);
+    const date = new Date(y, m - 1, d);
+    const [ty, tm, td] = (this._today || localDay(new Date())).split("-").map(Number);
+    if (new Date(ty, tm - 1, td - 1).getTime() === date.getTime()) {
+      return t(this._lang, "rec_yesterday");
+    }
+    return date.toLocaleDateString(this._hass?.locale?.language || undefined, {
+      weekday: "short", day: "numeric", month: "short",
+    });
+  }
+
+  _recordingsLabel() {
+    const lang = this._lang;
+    const day = this._dayLabel();
+    if (this._listError) return day;
+    if (!this._list) {
+      return day ? `${day} · ${t(lang, "rec_loading")}` : t(lang, "rec_loading");
+    }
+    const count = this._list.recordings.length;
+    const text = t(lang, this._list.complete ? "rec_count" : "rec_partial", { n: count });
+    return day ? `${day} · ${text}` : text;
+  }
+
+  _recordingsView() {
+    const lang = this._lang;
+    const view = document.createElement("div");
+    view.className = "rec";
+
+    const bar = document.createElement("div");
+    bar.className = "recBar";
+    const day = document.createElement("div");
+    day.className = "recDay";
+    day.textContent = this._recordingsLabel();
+    const days = document.createElement("div");
+    days.className = "days";
+    days.append(
+      this._recButton("mdi:chevron-left", t(lang, "rec_prev"), () => this._shiftDay(-1)),
+      this._recButton(
+        "mdi:chevron-right",
+        t(lang, "rec_next"),
+        () => this._shiftDay(1),
+        this._atToday()
+      ),
+      this._recButton(
+        "mdi:refresh",
+        t(lang, "rec_refresh"),
+        () => this._loadRecordings(true),
+        false,
+        this._listing
+      )
+    );
+    bar.append(day, days);
+    view.append(bar);
+
+    const list = document.createElement("div");
+    list.className = "recList";
+    list.style.maxHeight = "360px";
+    list.append(this._recordingsBody());
+    view.append(list);
+    return view;
+  }
+
+  _recButton(icon, title, onClick, disabled = false, spinning = false) {
+    const button = document.createElement("button");
+    button.className = "iconbtn" + (spinning ? " spinning" : "");
+    button.title = title;
+    button.setAttribute("aria-label", title);
+    button.disabled = disabled;
+    const el = document.createElement("ha-icon");
+    el.setAttribute("icon", icon);
+    button.append(el);
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onClick();
+    });
+    return button;
+  }
+
+  _recordingsBody() {
+    const lang = this._lang;
+    const frag = document.createDocumentFragment();
+    let note;
+    if (this._listError) {
+      note = document.createElement("div");
+      note.className = "recNote error";
+      note.textContent = t(lang, "rec_failed", { msg: this._listError });
+      frag.append(note);
+      return frag;
+    }
+    if (!this._list) {
+      note = document.createElement("div");
+      note.className = "recNote";
+      note.textContent = t(lang, "rec_loading");
+      frag.append(note);
+      return frag;
+    }
+    if (!this._list.recordings.length) {
+      note = document.createElement("div");
+      note.className = "recNote";
+      note.textContent = t(lang, "rec_none");
+      frag.append(note);
+      return frag;
+    }
+    let hour = null;
+    for (const rec of this._list.recordings) {
+      const start = new Date(rec.start);
+      if (start.getHours() !== hour) {
+        hour = start.getHours();
+        const header = document.createElement("div");
+        header.className = "recHour";
+        header.textContent = `${String(hour).padStart(2, "0")}:00`;
+        frag.append(header);
+      }
+      const on =
+        this._selected && this._selected.begin === rec.begin && this._selected.end === rec.end;
+      const row = document.createElement("button");
+      row.className = "recRow" + (on ? " on" : "");
+      const icon = document.createElement("ha-icon");
+      icon.setAttribute("icon", on ? "mdi:play-circle" : "mdi:play-circle-outline");
+      const time = document.createElement("span");
+      time.className = "time";
+      time.textContent = start.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+      const len = document.createElement("span");
+      len.className = "len";
+      len.textContent = `${rec.seconds} s`;
+      row.append(icon, time, len);
+      row.addEventListener("click", () => this._playRecording(rec));
+      frag.append(row);
+    }
+    return frag;
+  }
+
+  // The camera records HEVC; ask for it as is when this browser can play it and
+  // for an H.264 copy otherwise. A failed HEVC playback retries once in H.264.
+  _recFormat(fallback = false) {
+    if (fallback) return "h264";
+    return playsHevc() ? "hevc" : "h264";
+  }
+
+  async _playRecording(rec, fallback = false) {
+    const serial = this._serial();
+    if (!serial || !rec || !this._hass) return;
+    const gen = ++this._clipGen;
+    // A detached <video> keeps playing its sound: stop the old clip first.
+    this._clipVideo?.pause();
+    this._selected = rec;
+    this._clipState = "fetching";
+    this._clipError = "";
+    this._render();
+    const format = this._recFormat(fallback);
+    try {
+      const result = await this._hass.callWS({
+        type: "ezviz_rtsp/recording/clip",
+        serial,
+        begin: rec.begin,
+        end: rec.end,
+        format,
+      });
+      if (gen !== this._clipGen || !this._recordings) return;
+      this._clipState = "playing";
+      this._clipFormat = format;
+      this._render();
+      const video = this._ensureClipVideo();
+      video.src = result.url;
+      video.onerror = () => {
+        if (this._clipFormat === "hevc" && this._selected === rec) {
+          this._playRecording(rec, true);
+        }
+      };
+      video.play().catch(() => {});
+    } catch (err) {
+      if (gen !== this._clipGen) return;
+      this._clipState = "error";
+      this._clipError = err?.message || String(err);
+      this._render();
+    }
+  }
+
+  _closeClip() {
+    this._clipGen++;
+    const video = this._clipVideo;
+    if (video) {
+      video.pause();
+      video.removeAttribute("src");
+      try {
+        video.load();
+      } catch {
+        /* ignore */
+      }
+    }
+    this._selected = null;
+    this._clipState = "idle";
+    this._clipError = "";
+    this._clipFormat = "";
+  }
+
+  _ensureClipVideo() {
+    if (!this._clipVideo) {
+      const video = document.createElement("video");
+      video.controls = true;
+      video.playsInline = true;
+      video.setAttribute("playsinline", "");
+      this._clipVideo = video;
+    }
+    return this._clipVideo;
+  }
+
+  _renderRecordingMedia(media) {
+    if (this._clipState === "playing") {
+      media.appendChild(this._ensureClipVideo());
+      media.appendChild(this._closeClipButton());
+      return;
+    }
+    if (this._clipState === "fetching") {
+      const message = document.createElement("div");
+      message.className = "message";
+      message.textContent = t(this._lang, "rec_fetching");
+      media.appendChild(message);
+      const spinner = document.createElement("div");
+      spinner.className = "spinner";
+      media.appendChild(spinner);
+      return;
+    }
+    if (this._clipState === "error") {
+      const message = document.createElement("div");
+      message.className = "message";
+      message.textContent = this._clipError;
+      media.appendChild(message);
+      media.appendChild(this._closeClipButton());
+    }
+  }
+
+  _closeClipButton() {
+    const button = document.createElement("button");
+    button.className = "iconbtn recClose";
+    button.title = t(this._lang, "rec_close");
+    button.setAttribute("aria-label", button.title);
+    const icon = document.createElement("ha-icon");
+    icon.setAttribute("icon", "mdi:close");
+    button.append(icon);
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this._closeClip();
+      this._render();
+    });
+    return button;
+  }
+
   // -- playback ------------------------------------------------------------
 
   _maybeAutoPlay() {
     if (
       this._config &&
+      !this._recordings &&
       this._config.auto_play &&
       this.isConnected &&
       this._state === "idle" &&
@@ -915,7 +1408,7 @@ class EzvizVideoCard extends HTMLElement {
   }
 
   async _play() {
-    if (this._state === "loading" || this._state === "playing") return;
+    if (this._recordings || this._state === "loading" || this._state === "playing") return;
     const gen = ++this._gen;
     this._state = "loading";
     this._message = "";
@@ -1171,6 +1664,7 @@ class EzvizVideoCardEditor extends HTMLElement {
       { name: "hide_stop", selector: { boolean: {} } },
       { name: "hide_snapshot", selector: { boolean: {} } },
       { name: "show_timestamp", selector: { boolean: {} } },
+      { name: "show_battery", selector: { boolean: {} } },
     ];
     // Reuse the same <ha-form>. Lovelace calls setConfig() after every change;
     // replacing the form then would collapse the dialog and jump its scroll

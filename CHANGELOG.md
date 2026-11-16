@@ -28,6 +28,16 @@ This project follows [Semantic Versioning](https://semver.org/).
   the recording counterpart of `capture_picture`. A **Latest recording** sensor
   (`sensor.<camera>_latest_recording`) shows the file's start time, path,
   interval and format.
+- **Recordings in the video card.** The **filmstrip button next to the battery
+  level** switches the **EZVIZ Video** card between the live view and the
+  camera's SD-card recordings, so one card per camera is enough. The current
+  picture stays on screen until a recording is picked, and the clip plays in the
+  same media area. The list is read only when the mode is opened (listing wakes
+  a battery camera) and is cached until refresh; live video is stopped first, so
+  the camera never streams and reads its SD card at the same time.
+- **`show_battery`** on the video card (default `true`): set it to `false` to
+  hide the camera's charge, and the filmstrip button then sits alone in the
+  corner.
 
 ### Changed
 - Requires **pyezvizapi 2.5.1** (was 1.0.5.0). 2.0.0 added SD playback through
