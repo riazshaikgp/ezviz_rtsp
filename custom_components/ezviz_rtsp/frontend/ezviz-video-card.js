@@ -1358,7 +1358,10 @@ class EzvizVideoCard extends HTMLElement {
     }
     try {
       const result = await read;
-      if (gen !== this._listGen || !this._recordings) return;
+      if (gen !== this._listGen) return;
+      // The view may have been closed (and reopened) while the read was on its
+      // way. Keep the list anyway: reopening once it is here must not wake the
+      // camera for the same day again.
       this._list = result;
       this._listAt = Date.now();
       this._today = result.today;

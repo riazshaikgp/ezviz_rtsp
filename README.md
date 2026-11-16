@@ -462,7 +462,9 @@ day of a camera's recordings and plays the one you tap, right in the card.
   battery camera. **A page reload (a new card) reads the day again**, and so does
   reopening the view when today's list is more than a minute old; reopening
   sooner uses what is already here, so toggling the view does not wake the
-  camera every time. The calendar's month dots are read from the cache and the
+  camera every time. A read that was already on its way when the view was
+  closed is kept when it arrives, so closing and reopening quickly does not
+  start it again. The calendar's month dots are read from the cache and the
   media folder until you press **Check the SD card for this month**, which is
   the only part that asks the camera. Switching days quickly shares the read
   already on its way instead of starting another camera session for every tap.

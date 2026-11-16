@@ -67,6 +67,11 @@ This project follows [Semantic Versioning](https://semver.org/).
   the month was last checked and whether the check was complete.
 
 ### Fixed
+- **Closing and reopening the recordings view does not read the day twice.**
+  A list that was on its way when the view was closed was thrown away, so the
+  next open asked the camera for it again (with the cache bypassed). The card
+  now keeps that answer; reopening it within the minute uses it without waking
+  the camera. Toggling between live and recordings is otherwise cache-only.
 - **A finished day is read from the SD card only once, even across restarts.**
   Past-day lists lived only in memory, so after every restart opening yesterday,
   the day before, and so on, woke the camera again for each day. A day read
