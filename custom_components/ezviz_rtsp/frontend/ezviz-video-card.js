@@ -1044,6 +1044,15 @@ class EzvizVideoCard extends HTMLElement {
     if (!this._config) return;
     const root = this.shadowRoot;
     if (!root) return;
+    // WebKit (Safari, the Home Assistant apps) can scroll the page to the top
+    // when the focused element is removed together with its tree. Let go first;
+    // the card is about to be rebuilt anyway.
+    try {
+      const active = root.activeElement;
+      if (active && typeof active.blur === "function") active.blur();
+    } catch {
+      /* activeElement is not available in every embedded browser */
+    }
 
     // Rebuilding the card replaces the list, which would otherwise bounce it to
     // the top: a clip tapped near the bottom must stay where it was while it is
@@ -1767,6 +1776,9 @@ class EzvizVideoCard extends HTMLElement {
         this._selected && this._selected.begin === rec.begin && this._selected.end === rec.end;
       const row = document.createElement("button");
       row.className = "recRow" + (on ? " on" : "");
+      // Lets the finished download update this row without a full render.
+      row.dataset.begin = rec.begin;
+      row.dataset.end = rec.end;
       const icon = document.createElement("ha-icon");
       icon.setAttribute("icon", on ? "mdi:play-circle" : "mdi:play-circle-outline");
       const time = document.createElement("span");
@@ -1898,7 +1910,10 @@ class EzvizVideoCard extends HTMLElement {
       this._clipIncomplete = false;
       this._clipState = "playing";
       this._clipFormat = format;
-      this._render();
+      // Some browsers scroll the page when a video starts playing (or when the
+      // focused row disappears). Put the reader's place back around it.
+      const keepPlace = this._keepPagePlace();
+      this._showClipPlayer(rec);
       const video = this._ensureClipVideo();
       video.src = result.url;
       video.onloadedmetadata = () => {
@@ -1921,7 +1936,10 @@ class EzvizVideoCard extends HTMLElement {
           this._playRecording(rec, true);
         }
       };
+      video.addEventListener("playing", keepPlace, { once: true });
       video.play().catch(() => {});
+      keepPlace();
+      setTimeout(keepPlace, 0);
     } catch (err) {
       if (gen !== this._clipGen) return;
       this._stopProgress();
@@ -2041,6 +2059,90 @@ class EzvizVideoCard extends HTMLElement {
     this._clipIncomplete = false;
     this._clipQueued = false;
     this._queuedClip = null;
+  }
+
+  // Where the reader is: the scrolling ancestor's position, or the page's.
+  // Returns a function that puts it back if a browser moved it.
+  _keepPagePlace() {
+    let scroller = this.parentElement;
+    while (
+      scroller &&
+      scroller !== document.body &&
+      scroller !== document.documentElement
+    ) {
+      const style = getComputedStyle(scroller);
+      if (
+        /(auto|scroll)/.test(style.overflowY) &&
+        scroller.scrollHeight > scroller.clientHeight + 1
+      ) {
+        break;
+      }
+      scroller = scroller.parentElement;
+    }
+    if (!scroller || scroller === document.body || scroller === document.documentElement) {
+      scroller = null; // the page itself scrolls
+    }
+    const top = scroller ? scroller.scrollTop : window.scrollY;
+    const left = scroller ? scroller.scrollLeft : window.scrollX;
+    return () => {
+      try {
+        if (!scroller) {
+          if (Math.abs(window.scrollY - top) > 1) window.scrollTo(left, top);
+        } else if (Math.abs(scroller.scrollTop - top) > 1) {
+          scroller.scrollTop = top;
+          scroller.scrollLeft = left;
+        }
+      } catch {
+        /* an embedded browser without scrollTo */
+      }
+    };
+  }
+
+  // The clip is ready: put the player where the progress bar was. A full render
+  // would throw the whole card away - the row that was just clicked, its
+  // focus, and the page's place - right as the video starts.
+  _showClipPlayer(rec) {
+    this._syncClipRow(rec);
+    const media = this._media;
+    if (!media) {
+      this._render();
+      return;
+    }
+    this._progressDom = null;
+    this._whenEl?.remove();
+    this._whenEl = null;
+    media.replaceChildren();
+    if (this._posterEl) media.appendChild(this._posterEl);
+    media.appendChild(this._ensureClipVideo());
+    media.appendChild(this._closeClipButton());
+  }
+
+  // The row's "where" icon and length follow the saved file, without a render.
+  _syncClipRow(rec) {
+    const rows = this.shadowRoot?.querySelectorAll(".recRow") || [];
+    for (const row of rows) {
+      if (row.dataset.begin !== rec.begin || row.dataset.end !== rec.end) continue;
+      const where = row.querySelector(".where");
+      if (where) {
+        where.className =
+          "where" + (rec.incomplete ? " short" : rec.local ? " local" : "");
+        where.setAttribute(
+          "icon",
+          rec.incomplete
+            ? "mdi:cloud-alert"
+            : rec.local
+              ? "mdi:check-circle"
+              : "mdi:cloud-outline"
+        );
+        where.title = t(
+          this._lang,
+          rec.incomplete ? "rec_incomplete" : rec.local ? "rec_local" : "rec_cloud"
+        );
+      }
+      const len = row.querySelector(".len");
+      if (len) len.textContent = `${rec.seconds} s`;
+      return;
+    }
   }
 
   _ensureClipVideo() {

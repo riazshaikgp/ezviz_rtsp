@@ -67,6 +67,15 @@ This project follows [Semantic Versioning](https://semver.org/).
   the month was last checked and whether the check was complete.
 
 ### Fixed
+- **The page no longer jumps to the top when a download finishes and starts
+  playing.** The player used to replace the whole card, which threw away the
+  list, the row that had just been clicked, and its focus — WebKit (Safari and
+  the Home Assistant apps) scrolls the page to the top when a focused element
+  disappears with its tree, and scroll anchoring can move the view too. The
+  media area now swaps the progress bar for the player in place, the row's
+  cloud icon and length are updated in place, and the reader's scroll position
+  is put back around the first `playing` event for browsers that scroll a
+  starting video into view.
 - **The card no longer rebuilds itself while a clip is downloading.** Opening the
   view asks the server whether its list is still fresh; when that answer arrived
   (a second or two later) the card threw away and re-created its whole shadow
