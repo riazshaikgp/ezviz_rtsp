@@ -135,6 +135,7 @@ hide_stop: false       # optional; hide the stop chip
 hide_snapshot: false   # optional; hide the snapshot chip
 show_timestamp: false  # optional; show the picture's date and time
 show_battery: true     # optional; false hides the battery level
+hide_recordings: false # optional; hide the recordings button
 ```
 
 | Option | Default | What it does |
@@ -152,6 +153,7 @@ show_battery: true     # optional; false hides the battery level
 | `hide_snapshot` | `false` | Hide the card's snapshot chip. |
 | `show_timestamp` | `false` | Show the date and time of the picture currently on the card (the motion or snapshot image, whichever `picture` selects) in the top-right corner. It disappears while a clip is playing. |
 | `show_battery` | `true` | Show the camera's charge next to the name, when the integration exposes it. `false` hides it. |
+| `hide_recordings` | `false` | Hide the recordings button (and with it the SD-card view) from this card. |
 
 All of these are also in the card's **visual editor**, which lists your cameras
 and exposes the picture and button options. By default the card does nothing
@@ -182,7 +184,8 @@ A **battery camera's charge** is shown in the top-right corner, opposite the
 camera name, when the integration exposes it; `show_battery: false` hides it.
 Directly to its left is the **filmstrip button**, which switches the card to the
 camera's SD-card recordings (see
-[Recordings in the video card](#recordings-in-the-video-card)).
+[Recordings in the video card](#recordings-in-the-video-card)); `hide_recordings:
+true` removes it.
 
 The card shows the picture through the integration's **own fast picture stream**
 (a live MJPEG) so it appears a few seconds after the camera wakes, rather than
@@ -442,6 +445,9 @@ view.
 - **Live video stops** as soon as the mode opens. The camera cannot stream and
   read its SD card at the same time, so this is what keeps playback from failing;
   going back to the live view starts the stream again when `auto_play` is on.
+  The integration is asked to **release the cloud session at once** rather than
+  after the configured *Release the camera after* delay, so the first tap works
+  immediately — the card does not wait the 10 seconds a normal stop would.
 - The day arrows, hour grouping and the ✕ player work exactly as in the
   **EZVIZ Recordings** card; the format follows the browser (HEVC when it plays
   it, H.264 otherwise), and a failed HEVC clip is retried in H.264.

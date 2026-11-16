@@ -224,6 +224,31 @@ class LiveStream:
         if self.on_no_video is not None:
             self.on_no_video()
 
+    async def async_stop(self) -> bool:
+        """Close the stream now, without waiting for the release delay.
+
+        The session is normally held open for the linger time, so a quick
+        re-open does not wake the camera again. SD-card playback needs the
+        camera to itself, so the card asks for the session to go at once.
+        """
+        if self._linger is not None:
+            self._linger.cancel()
+            self._linger = None
+        if self._deadline is not None:
+            self._deadline.cancel()
+            self._deadline = None
+        if (task := self._task) is None:
+            return False
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        # A task cancelled before it ran never told its readers.
+        self._task = None
+        for queue in self._readers:
+            queue.put_nowait(None)
+        _LOGGER.info("Live view of %s stopped (the camera is needed elsewhere)", self.serial)
+        return True
+
     async def async_close(self) -> None:
         """Close the stream now (the entry is unloading)."""
         if self._linger is not None:

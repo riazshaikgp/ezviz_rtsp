@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -299,6 +300,33 @@ async def test_clip_refused_while_the_camera_streams_live(hass, _cloud) -> None:
         with pytest.raises(rec_module.RecordingError, match="streaming live"):
             await rec_module.async_get_clip(hass, camera, begin, begin + timedelta(seconds=8), "h264")
         download.assert_not_called()
+
+
+async def test_websocket_releases_the_live_stream_at_once(
+    hass, hass_ws_client, _cloud
+) -> None:
+    entry, _ = await _setup_with_index(hass, [])
+    stream = entry.runtime_data.live_streams["BK1"]
+    ws = await hass_ws_client(hass)
+
+    # Nothing is open: the answer says so, and nothing breaks.
+    await ws.send_json({"id": 1, "type": "ezviz_rtsp/live/stop", "serial": "BK1"})
+    msg = await ws.receive_json()
+    assert msg["success"], msg
+    assert msg["result"] == {"stopped": False}
+
+    # With a live task open, the card's request releases it now, not after the
+    # release delay; otherwise the first SD playback would find the camera busy.
+    async def forever() -> None:
+        await asyncio.sleep(3600)
+
+    stream._task = asyncio.create_task(forever())
+    assert stream.active
+    await ws.send_json({"id": 2, "type": "ezviz_rtsp/live/stop", "serial": "BK1"})
+    msg = await ws.receive_json()
+    assert msg["success"], msg
+    assert msg["result"] == {"stopped": True}
+    assert not stream.active
 
 
 async def test_downloaded_clips_are_reindexed_after_a_restart(hass, _cloud) -> None:

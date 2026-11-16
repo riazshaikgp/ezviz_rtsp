@@ -16,6 +16,7 @@
 //   hide_snapshot: false   # optional; hide the snapshot chip
 //   show_timestamp: false  # optional; show the picture's date and time
 //   show_battery: true     # optional; false hides the battery level
+//   hide_recordings: false # optional; hide the recordings button
 //
 // The card shows the camera's live picture from the integration's own stream:
 // its fast MJPEG path (an <img> that appears a few seconds after the camera
@@ -109,6 +110,7 @@ const STRINGS = /* translations */ {
     "hide_snapshot": "Hide the snapshot button",
     "show_timestamp": "Show the picture date and time",
     "show_battery": "Show the battery level",
+    "hide_recordings": "Hide the recordings button",
     "recordings": "Recordings",
     "recordings_show": "Show the camera's recordings",
     "recordings_hide": "Back to the live view",
@@ -155,6 +157,7 @@ const STRINGS = /* translations */ {
     "hide_snapshot": "Приховати кнопку снапшота",
     "show_timestamp": "Показувати дату й час знімка",
     "show_battery": "Показувати заряд батареї",
+    "hide_recordings": "Приховати кнопку записів",
     "recordings": "Записи",
     "recordings_show": "Показати записи камери",
     "recordings_hide": "Повернутися до живого відео",
@@ -199,6 +202,7 @@ const CARD_DEFAULTS = {
   hide_snapshot: false,
   show_timestamp: false,
   show_battery: true,
+  hide_recordings: false,
 };
 
 const style = /* css */ `
@@ -434,6 +438,12 @@ class EzvizVideoCard extends HTMLElement {
     // shows the camera's last picture and waits for a tap, so opening the
     // dashboard never wakes a battery camera.
     this._config = { ...CARD_DEFAULTS, ...config };
+    // Hiding the button while the recordings view is open would leave no way
+    // back to the live view, so the mode ends with it.
+    if (this._config.hide_recordings && this._recordings) {
+      this._closeClip();
+      this._recordings = false;
+    }
     this._device = undefined;
     this._images = {};
     this._imagesFrom = undefined;
@@ -877,7 +887,8 @@ class EzvizVideoCard extends HTMLElement {
     battery.className = "battery";
     const tools = document.createElement("div");
     tools.className = "tools";
-    tools.append(this._recordingsButton(), battery);
+    if (!this._config.hide_recordings) tools.append(this._recordingsButton());
+    tools.append(battery);
     header.append(tile, info, tools);
 
     // Media
@@ -1077,7 +1088,30 @@ class EzvizVideoCard extends HTMLElement {
     this._state = "idle";
     this._message = "";
     this._render();
+    this._openRecordings();
+  }
+
+  async _openRecordings() {
+    // The serial comes from the camera entity when the card was configured with
+    // one, so wait for the device list before releasing the camera.
+    await this._loadDevices();
+    if (!this._recordings) return;
+    await this._stopLive();
+    if (!this._recordings) return;
     this._loadRecordings();
+  }
+
+  // The card dropping its picture is not enough: the integration keeps the
+  // camera's cloud session open for the configured release delay, and SD
+  // playback then finds the camera busy. Ask it to let go at once.
+  async _stopLive() {
+    const serial = this._serial();
+    if (!serial || !this._hass) return;
+    try {
+      await this._hass.callWS({ type: "ezviz_rtsp/live/stop", serial });
+    } catch (err) {
+      console.debug(`[ezviz-video-card] live stop ${serial}: ${err?.message || err}`);
+    }
   }
 
   _serial() {
@@ -1293,6 +1327,10 @@ class EzvizVideoCard extends HTMLElement {
     this._clipState = "fetching";
     this._clipError = "";
     this._render();
+    // Another view (or another browser) may have started the live stream since
+    // the list was read; release it again so the camera is free for playback.
+    await this._stopLive();
+    if (gen !== this._clipGen || !this._recordings) return;
     const format = this._recFormat(fallback);
     try {
       const result = await this._hass.callWS({
@@ -1665,6 +1703,7 @@ class EzvizVideoCardEditor extends HTMLElement {
       { name: "hide_snapshot", selector: { boolean: {} } },
       { name: "show_timestamp", selector: { boolean: {} } },
       { name: "show_battery", selector: { boolean: {} } },
+      { name: "hide_recordings", selector: { boolean: {} } },
     ];
     // Reuse the same <ha-form>. Lovelace calls setConfig() after every change;
     // replacing the form then would collapse the dialog and jump its scroll

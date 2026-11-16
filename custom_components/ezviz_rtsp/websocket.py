@@ -20,7 +20,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
 from .const import CONF_CODES, DATA_WS, DOMAIN
-from .live import CARD_MJPEG_TTL, card_mjpeg_path
+from .live import CARD_MJPEG_TTL, card_mjpeg_path, find_stream
 from .recordings import (
     FORMATS,
     RecordingError,
@@ -40,6 +40,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
         return
     hass.data[DATA_WS] = True
     async_register_command(hass, ws_get_devices)
+    async_register_command(hass, ws_live_stop)
     async_register_command(hass, ws_recordings)
     async_register_command(hass, ws_recording_clip)
 
@@ -95,6 +96,28 @@ async def ws_get_devices(
                 }
             )
     connection.send_result(msg["id"], devices)
+
+
+@websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/live/stop",
+        vol.Required("serial"): str,
+    }
+)
+@async_response
+async def ws_live_stop(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Release a camera's live stream at once, for another use of the camera.
+
+    The card drops its own picture when the recordings view opens, but the
+    integration holds the cloud session open for the configured release delay so
+    a quick re-open does not wake the camera again. SD playback needs the camera
+    to itself, so the card asks for the session to go now, not after that delay.
+    """
+    stream = find_stream(hass, msg["serial"])
+    stopped = await stream.async_stop() if stream is not None else False
+    connection.send_result(msg["id"], {"stopped": stopped})
 
 
 @websocket_command(

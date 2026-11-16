@@ -38,6 +38,17 @@ This project follows [Semantic Versioning](https://semver.org/).
 - **`show_battery`** on the video card (default `true`): set it to `false` to
   hide the camera's charge, and the filmstrip button then sits alone in the
   corner.
+- **`hide_recordings`** on the video card (default `false`): hide the filmstrip
+  button for a dashboard that should not offer the SD-card view.
+
+### Fixed
+- **Playing a recording right after watching live no longer fails.** The card
+  used to drop its own picture but leave the integration's cloud session open
+  for the configured *Release the camera after* delay, so the first SD-card
+  playback found the camera busy ("The camera is streaming live; stop the live
+  view first"). The card now releases the session through a new
+  `ezviz_rtsp/live/stop` websocket command as soon as the recordings view opens
+  (and again before each clip), so playback starts immediately.
 
 ### Changed
 - Requires **pyezvizapi 2.5.1** (was 1.0.5.0). 2.0.0 added SD playback through
