@@ -67,6 +67,15 @@ This project follows [Semantic Versioning](https://semver.org/).
   the month was last checked and whether the check was complete.
 
 ### Fixed
+- **Opening the recordings view no longer forces a camera read.** The card used
+  to send "refresh" whenever it reopened with a list it thought old, bypassing
+  the integration's cache. It now simply asks, and the integration decides:
+  today's list is reused while it is under a minute old (even on a page reload),
+  a finished day comes from `.storage`, and the camera is read only when the
+  cache cannot answer. Only the ⟳ button bypasses the cache. Rapid switching
+  between a read and an unread day joins the read already in flight rather than
+  queueing another camera session, and a failed read is not cached, so the next
+  attempt is allowed.
 - **Closing and reopening the recordings view does not read the day twice.**
   A list that was on its way when the view was closed was thrown away, so the
   next open asked the camera for it again (with the cache bypassed). The card

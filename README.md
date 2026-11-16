@@ -458,22 +458,21 @@ day of a camera's recordings and plays the one you tap, right in the card.
   same, is deleted after about two hours and never appears under **Media**. It
   does not get a green check, and the retention setting does not apply to it. A
   clip already saved earlier still plays from its permanent copy.
-- **The SD card is read only when the mode is opened**, because listing wakes a
-  battery camera. **A page reload (a new card) reads the day again**, and so does
-  reopening the view when today's list is more than a minute old; reopening
-  sooner uses what is already here, so toggling the view does not wake the
-  camera every time. A read that was already on its way when the view was
-  closed is kept when it arrives, so closing and reopening quickly does not
-  start it again. The calendar's month dots are read from the cache and the
-  media folder until you press **Check the SD card for this month**, which is
-  the only part that asks the camera. Switching days quickly shares the read
-  already on its way instead of starting another camera session for every tap.
-  The ⟳ button always reads the camera again. A **past day** is read from the
-  camera once after it has ended and then kept in Home Assistant's `.storage`
-  (key `ezviz_rtsp.day_lists`), so opening it later — even after a restart — is
-  instant and does not wake the camera. A day that was only read while it was
-  still running is read once more after midnight, since its list could still
-  have grown. A card that leaves the screen pauses its player.
+- **Opening the view never forces a read; only ⟳ does.** The integration owns
+  the cache: today's list is reused while it is under a minute old (a page
+  reload included), and read from the camera only once that minute is over. A
+  finished past day is stored in Home Assistant's `.storage`
+  (`ezviz_rtsp.day_lists`) the first time it is read after it ended, so it is
+  never read again — even after a restart — and an empty day is kept too. A day
+  read only while it was still running is read once more after midnight, since
+  its list could still have grown. Switching days quickly shares the read
+  already on its way (also across cards) instead of queueing a camera session
+  per tap, and a failed read is not cached, so the next attempt may reach the
+  camera again. The calendar's month dots come from the cache and the media
+  folder until you press **Check the SD card for this month**, which is the
+  only part that asks the camera. A read that was on its way when the view was
+  closed is kept when it arrives. A card that leaves the screen pauses its
+  player.
 
 ### Getting the latest recording on demand
 
@@ -543,8 +542,8 @@ recording is also readable from the **Media** browser under `ezviz_rtsp`.
   `media/ezviz_rtsp/<year>/<month>/<day>/`, using Home Assistant's local time.
   Seeking and playing it again don't touch the camera, and the files survive a
   restart. Browse and download them from **Media → My media → ezviz_rtsp**,
-  where the years, months and days are the folders. A past day's list is kept
-  until you press refresh; today's for a minute.
+  where the years, months and days are the folders. A finished day's list is
+  kept in storage and reused; today's for a minute (or until ⟳).
 - **How long they stay.** Under **Configure → Downloaded recordings** you choose
   how many days those MP4s are kept (default **7**); older files are deleted,
   the rest left alone. `0` keeps them until you delete them yourself. The folder

@@ -1188,6 +1188,25 @@ async def test_a_fetch_publishes_progress_and_clears_it(hass, _cloud) -> None:
     assert path.exists()
 
 
+async def test_today_is_reused_for_a_minute_and_refresh_forces(hass, _cloud) -> None:
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    tz = ZoneInfo("Africa/Johannesburg")
+    now = datetime.now(tz)
+    today = now.date()
+    start = datetime.combine(today, datetime.min.time(), tz) + timedelta(minutes=1)
+    _entry, index = await _setup_with_index(hass, [start])
+    camera = rec_module.find_camera(hass, "BK1")
+
+    await rec_module.async_list_day(hass, camera, today)
+    assert len(index.calls) == 1
+    # Nothing but the refresh button may read today's list again this soon.
+    await rec_module.async_list_day(hass, camera, today)
+    assert len(index.calls) == 1, "a list under a minute old is reused"
+
+    await rec_module.async_list_day(hass, camera, today, refresh=True)
+    assert len(index.calls) == 2, "the refresh button forces a read"
+
+
 async def test_a_finished_past_day_survives_a_restart(
     hass, _cloud, hass_storage
 ) -> None:

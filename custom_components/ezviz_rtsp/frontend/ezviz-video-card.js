@@ -552,7 +552,6 @@ class EzvizVideoCard extends HTMLElement {
     this._listError = "";
     this._listGen = 0;
     this._reads = new Map(); // day reads on their way, shared by quick switches
-    this._listAt = 0; // when the list was last read (for today's freshness)
     this._listScroll = 0; // where the recordings list was scrolled to
     this._listScrollReset = false; // a day change or refresh starts at the top
     this._calendarOpen = false; // the day picker under the bar
@@ -610,7 +609,6 @@ class EzvizVideoCard extends HTMLElement {
     if (previous && was !== now) {
       this._closeClip();
       this._list = null;
-      this._listAt = 0;
       this._listScroll = 0;
       this._listScrollReset = true;
       this._day = null;
@@ -1289,13 +1287,11 @@ class EzvizVideoCard extends HTMLElement {
     if (!this._recordings) return;
     await this._stopLive();
     if (!this._recordings) return;
-    // A freshly loaded page (a new card) reads the day from the SD card again,
-    // and so does reopening the view when today's list is over a minute old.
-    // Anything else uses what is already here, so toggling does not wake the
-    // camera; ⟳ always re-reads.
-    const today = !this._day || this._day === this._today;
-    const stale = !this._list || (today && Date.now() - this._listAt > 60000);
-    this._loadRecordings(stale);
+    // Ask the server each time the view opens, but never force a read. It
+    // answers from its cache while today's list is under a minute old, from the
+    // stored list of a day that is over, and reads the camera only when it has
+    // nothing fresh. The ⟳ button is the only thing that bypasses the cache.
+    this._loadRecordings(false, true);
   }
 
   // The card dropping its picture is not enough: the integration keeps the
@@ -1315,10 +1311,11 @@ class EzvizVideoCard extends HTMLElement {
     return this._config?.serial || this._findDevice()?.serial || null;
   }
 
-  async _loadRecordings(refresh = false) {
+  async _loadRecordings(refresh = false, check = false) {
     if (!this._recordings || !this._hass) return;
-    // The list is cached while the card lives; the refresh button re-reads it.
-    if (this._list && !refresh) return;
+    // The list is cached while the card lives; the refresh button re-reads it,
+    // and opening the view asks the server whether its copy is still fresh.
+    if (this._list && !refresh && !check) return;
     // The ⟳ button is above the list: a fresh read starts at the top.
     if (refresh) {
       this._listScrollReset = true;
@@ -1363,7 +1360,6 @@ class EzvizVideoCard extends HTMLElement {
       // way. Keep the list anyway: reopening once it is here must not wake the
       // camera for the same day again.
       this._list = result;
-      this._listAt = Date.now();
       this._today = result.today;
       this._day = result.date;
     } catch (err) {
