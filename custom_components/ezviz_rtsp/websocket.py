@@ -23,6 +23,7 @@ from homeassistant.helpers import entity_registry as er
 from .const import CONF_CODES, DATA_WS, DOMAIN
 from .live import CARD_MJPEG_TTL, card_mjpeg_path, find_stream
 from .recordings import (
+    DATA_RECORDINGS,
     FORMATS,
     RecordingError,
     async_clip_states,
@@ -46,6 +47,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
     hass.data[DATA_WS] = True
     async_register_command(hass, ws_get_devices)
     async_register_command(hass, ws_live_stop)
+    async_register_command(hass, ws_live_status)
     async_register_command(hass, ws_recordings)
     async_register_command(hass, ws_recording_days)
     async_register_command(hass, ws_recording_progress)
@@ -125,6 +127,31 @@ async def ws_live_stop(
     stream = find_stream(hass, msg["serial"])
     stopped = await stream.async_stop() if stream is not None else False
     connection.send_result(msg["id"], {"stopped": stopped})
+
+
+@websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/live/status",
+        vol.Required("serial"): str,
+    }
+)
+@async_response
+async def ws_live_status(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Whether a live start of this camera is waiting for the SD card.
+
+    The card shows "Waiting for the download to finish…" before "Waking the
+    camera…" while a recording is still coming off the card, so it asks here
+    rather than starting a stream that would only sit in the queue.
+    """
+    serial = msg["serial"]
+    stream = find_stream(hass, serial)
+    store = hass.data.get(DATA_RECORDINGS)
+    waiting = bool(stream is not None and stream.waiting)
+    if store is not None and store.downloading(serial):
+        waiting = True
+    connection.send_result(msg["id"], {"waiting": waiting})
 
 
 @websocket_command(

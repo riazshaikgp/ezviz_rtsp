@@ -87,6 +87,7 @@ const STRINGS = /* translations */ {
     "play": "Watch",
     "stop": "Stop",
     "starting": "Waking the camera…",
+    "waiting_download": "Waiting for the download to finish…",
     "loading": "Loading…",
     "live": "Live",
     "idle": "Tap to watch",
@@ -156,6 +157,7 @@ const STRINGS = /* translations */ {
     "play": "Дивитися",
     "stop": "Зупинити",
     "starting": "Прокидаємо камеру…",
+    "waiting_download": "Очікування завершення завантаження…",
     "loading": "Завантаження…",
     "live": "Наживо",
     "idle": "Торкніться, щоб дивитися",
@@ -566,6 +568,7 @@ class EzvizVideoCard extends HTMLElement {
     this._clipFetching = null; // the camera download in flight, if any
     this._queuedClip = null; // the newest tap waiting for that download
     this._clipQueued = false; // the view is waiting, not fetching yet
+    this._waitingDownload = false; // live is held back by a clip download
     this._progress = null; // the latest report on the clip being fetched
     this._progressTimer = null;
     this._progressDom = null; // the bar in the media area, updated in place
@@ -1141,6 +1144,7 @@ class EzvizVideoCard extends HTMLElement {
 
   _statusText() {
     if (this._started) return t(this._lang, "live");
+    if (this._waitingDownload) return t(this._lang, "waiting_download");
     if (this._state === "playing" || this._state === "loading") {
       return t(this._lang, "starting");
     }
@@ -2073,6 +2077,12 @@ class EzvizVideoCard extends HTMLElement {
       return;
     }
 
+    // A clip still coming off the SD card owns the camera: the live stream
+    // would only sit in the queue behind it. Say so, wait for the download to
+    // end, then wake the camera as usual.
+    await this._awaitDownload(gen);
+    if (gen !== this._gen) return;
+
     // Prefer the integration's own MJPEG: it appears a few seconds after the
     // camera wakes, while Home Assistant's HLS waits for its stream worker to
     // build segments (a much longer first start). HLS stays the fallback.
@@ -2081,6 +2091,47 @@ class EzvizVideoCard extends HTMLElement {
       this._startMjpeg(gen, lang, entity, new URL(mjpeg, window.location.origin).toString());
     } else {
       await this._startHls(gen, lang, entity);
+    }
+  }
+
+  // The card does not know about a download another card (or the download
+  // service) started, so it asks the integration. One answer without a
+  // download means there is nothing to wait for; otherwise the status says
+  // "Waiting for the download to finish…" until the camera is free.
+  async _awaitDownload(gen) {
+    const serial = this._serial();
+    if (!serial || !this._hass) return;
+    const ask = async () => {
+      const result = await this._hass.callWS({
+        type: "ezviz_rtsp/live/status",
+        serial,
+      });
+      return Boolean(result?.waiting);
+    };
+    let waiting;
+    try {
+      waiting = await ask();
+    } catch {
+      return; // the status is a hint; the stream request is the real test
+    }
+    if (!waiting || gen !== this._gen) return;
+    this._waitingDownload = true;
+    this._render();
+    try {
+      while (gen === this._gen) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        if (gen !== this._gen) return;
+        try {
+          if (!(await ask())) break;
+        } catch {
+          break;
+        }
+      }
+    } finally {
+      if (gen === this._gen) {
+        this._waitingDownload = false;
+        this._render();
+      }
     }
   }
 
@@ -2199,6 +2250,7 @@ class EzvizVideoCard extends HTMLElement {
   _onStarted(gen, lang) {
     if (gen !== this._gen || this._started) return;
     this._started = true;
+    this._waitingDownload = false;
     clearTimeout(this._startupTimer);
     this._startupTimer = null;
     console.info(`[ezviz-video-card] v${CARD_VERSION} streaming`, this._entityId() || this._config.serial);
@@ -2224,6 +2276,7 @@ class EzvizVideoCard extends HTMLElement {
 
   _stop(render = false, message = "") {
     this._gen += 1; // abandon any open that is still in flight
+    this._waitingDownload = false;
     clearTimeout(this._timer);
     this._timer = null;
     clearTimeout(this._startupTimer);

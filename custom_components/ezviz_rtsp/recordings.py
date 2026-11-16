@@ -164,6 +164,11 @@ class RecordingStore:
         """The lock that serialises SD requests to one camera."""
         return self.locks.setdefault(serial, asyncio.Lock())
 
+    def downloading(self, serial: str) -> bool:
+        """Whether a clip of this camera is queued for or coming off the card."""
+        return any(key[0] == serial for key in self.progress)
+
+
 
 DATA_RECORDINGS = f"{DOMAIN}_recordings"
 DATA_RECORDINGS_LOCK = f"{DOMAIN}_recordings_lock"
@@ -629,6 +634,20 @@ async def async_close_store(hass: HomeAssistant) -> None:
     hass.data.pop(DATA_LISTS_STORE, None)
     if (unsub := hass.data.pop(DATA_RECORDINGS_TIMER, None)) is not None:
         unsub()
+
+async def async_wait_for_camera(hass: HomeAssistant, serial: str) -> None:
+    """Wait until an SD read or clip download of this camera has finished.
+
+    The camera cannot stream live and read its SD card at the same time, so a
+    live start waits here instead of fighting the download. The lock is held
+    only for the wait: once the stream opens, SD requests keep themselves out
+    by seeing the live stream active.
+    """
+    store: RecordingStore | None = hass.data.get(DATA_RECORDINGS)
+    if store is None:
+        return
+    async with store.lock(serial):
+        return
 
 
 # -- finding a camera ------------------------------------------------------------

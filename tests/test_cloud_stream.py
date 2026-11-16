@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 import types
+from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -28,6 +29,10 @@ from custom_components.ezviz_rtsp.live import (
     card_mjpeg_path,
     stream_source,
     uses_cloud_stream,
+)
+from custom_components.ezviz_rtsp.recordings import (
+    DATA_RECORDINGS,
+    RecordingStore,
 )
 
 # --- MPEG-PS building blocks (borrowed shapes from real EZVIZ captures) --------
@@ -251,6 +256,67 @@ async def test_powered_stream_has_no_hard_limit(upstream) -> None:
     assert stream._deadline is None
     await frames.aclose()
     await stream.async_close()
+
+
+async def test_a_live_start_waits_for_the_sd_card(upstream, tmp_path) -> None:
+    # A clip download (or a day read) holds the camera: the live view waits for
+    # it instead of opening a second session EZVIZ would refuse.
+    store = RecordingStore(tmp_path / "media", UTC)
+    hass = _hass()
+    hass.data[DATA_RECORDINGS] = store
+    stream = LiveStream(hass, _coordinator(), "BK1", 1, lambda: None)
+    holder = store.lock("BK1")
+    await holder.acquire()
+    frames = stream.frames()
+    pending = asyncio.ensure_future(anext(frames))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert stream.waiting is True, "the card can say the live view is waiting"
+    assert upstream.opens == 0, "the camera is not woken while the SD card is read"
+
+    holder.release()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert stream.waiting is False
+    assert upstream.opens == 1, "the stream opens once the download has finished"
+    upstream.queue.put_nowait(IMKH + KEY + PACK)
+    assert await pending == KEY
+    await frames.aclose()
+    await stream.async_close()
+
+
+def test_a_live_start_without_a_clip_download_does_not_wait(upstream, tmp_path) -> None:
+    store = RecordingStore(tmp_path / "media", UTC)
+    hass = _hass()
+    hass.data[DATA_RECORDINGS] = store
+    stream = LiveStream(hass, _coordinator(), "BK1", 1, lambda: None)
+
+    assert stream.waiting is False
+
+
+async def test_cancelling_a_waiting_live_start_clears_the_flag(upstream, tmp_path) -> None:
+    store = RecordingStore(tmp_path / "media", UTC)
+    hass = _hass()
+    hass.data[DATA_RECORDINGS] = store
+    stream = LiveStream(hass, _coordinator(), "BK1", 1, lambda: None)
+    holder = store.lock("BK1")
+    await holder.acquire()
+    frames = stream.frames()
+    pending = asyncio.ensure_future(anext(frames))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert stream.waiting is True
+
+    await stream.async_close()
+    with pytest.raises(StopAsyncIteration):
+        await pending
+    holder.release()
+
+    assert stream.waiting is False
+    assert upstream.opens == 0, "a cancelled wait never wakes the camera"
+    await frames.aclose()
 
 
 def test_linger_defaults_and_is_configurable() -> None:

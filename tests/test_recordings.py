@@ -1420,6 +1420,31 @@ async def test_websocket_reports_download_progress(hass, hass_ws_client, _cloud)
     assert msg["result"] == {"active": False}
 
 
+async def test_websocket_says_when_a_live_start_is_waiting_for_a_download(
+    hass, hass_ws_client, _cloud
+) -> None:
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    ws = await hass_ws_client(hass)
+
+    await ws.send_json({"id": 1, "type": "ezviz_rtsp/live/status", "serial": "BK1"})
+    msg = await ws.receive_json()
+    assert msg["success"], msg
+    assert msg["result"] == {"waiting": False}
+
+    store.progress[("BK1", "20261116T080000Z", "20261116T080008Z", "h264")] = {
+        "stage": "downloading"
+    }
+    await ws.send_json({"id": 2, "type": "ezviz_rtsp/live/status", "serial": "BK1"})
+    msg = await ws.receive_json()
+    assert msg["result"] == {"waiting": True}
+
+    # Another camera's download does not hold this one back.
+    await ws.send_json({"id": 3, "type": "ezviz_rtsp/live/status", "serial": "OTHER"})
+    msg = await ws.receive_json()
+    assert msg["result"] == {"waiting": False}
+
+
 async def test_flat_clips_are_migrated_into_day_folders(hass, _cloud) -> None:
     await _setup_with_index(hass, [])
     store = await rec_module.async_get_store(hass)

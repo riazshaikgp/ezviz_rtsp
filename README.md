@@ -452,6 +452,15 @@ day of a camera's recordings and plays the one you tap, right in the card.
   When an incomplete copy is being replaced, the card says **"The saved
   recording is incomplete — downloading it again…"** instead of the usual
   fetching message.
+- **Live waits for a download that is still running.** The camera cannot
+  stream and read its SD card at once, so pressing live (or opening a card with
+  auto-play) while a recording is coming off the card first says **"Waiting for
+  the download to finish…"** and only then **"Waking the camera…"**. The
+  download is not cancelled: it completes and is saved, and the stream starts
+  as soon as the camera is free. The integration holds the live start on the
+  same per-camera lock the downloads use, so this also works when another card
+  or the download service started the clip, and it never leaves a second EZVIZ
+  session open in the meantime.
 - **Watching a clip saves it by default.** Turn **Save watched recordings**
   (`save_recordings: false`) off in the card's settings to keep the media folder
   clean: a watched recording is then fetched into a temporary folder, plays the

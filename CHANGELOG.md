@@ -67,6 +67,15 @@ This project follows [Semantic Versioning](https://semver.org/).
   the month was last checked and whether the check was complete.
 
 ### Fixed
+- **Live view waits for a clip download instead of failing it.** Pressing live
+  while a recording was still coming off the SD card used to start a second
+  EZVIZ session that the camera refuses, so both the clip and the live view
+  could fail. The live start now waits on the same per-camera lock the
+  downloads use and opens the stream once the download has finished; the
+  download is left to complete. The card shows **"Waiting for the download to
+  finish…"** before **"Waking the camera…"**, asking a new
+  `ezviz_rtsp/live/status` command, so a download started by another card (or
+  by the download service) is waited for too.
 - **Opening the recordings view no longer forces a camera read.** The card used
   to send "refresh" whenever it reopened with a list it thought old, bypassing
   the integration's cache. It now simply asks, and the integration decides:

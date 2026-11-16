@@ -45,7 +45,7 @@ from .const import (
     DATA_LIVE_VIEW,
     DOMAIN,
 )
-from .recordings import RecordingClipView
+from .recordings import RecordingClipView, async_wait_for_camera
 
 if TYPE_CHECKING:
     from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
@@ -125,6 +125,9 @@ class LiveStream:
         self._cooldown_until = 0.0
         # Whether the current open has handed a keyframe to its readers.
         self._video = False
+        # Whether the open is waiting for a clip download or an SD read to end
+        # before it may wake the camera. The card shows this in its status.
+        self.waiting = False
         # Called when an open ends without video (the live camera stops HA's stream worker).
         self.on_no_video: Callable[[], None] | None = None
         self.codec = "hevc"
@@ -272,6 +275,14 @@ class LiveStream:
         end: _Item = None
         started = False
         try:
+            # A clip download or a day read holds the camera, and EZVIZ refuses a
+            # stream while the SD card is being read. Wait for it to finish (the
+            # card shows that it is waiting) instead of failing the live view.
+            self.waiting = True
+            try:
+                await async_wait_for_camera(self._hass, self.serial)
+            finally:
+                self.waiting = False
             client = self._coordinator.ezviz_client
             _LOGGER.debug("Opening the EZVIZ cloud stream of %s", self.serial)
             source = LiveSource(client, self.serial, self.channel)
