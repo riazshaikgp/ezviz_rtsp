@@ -38,7 +38,7 @@ from .const import (
 )
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
 from .live import async_close_live_streams, async_setup_live_streams
-from .recordings import async_close_store
+from .recordings import async_close_store, async_prune_recordings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -140,6 +140,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: EzvizConfigEntry) -> boo
         async_setup_live_streams(hass, entry, coordinator)
         # Ship the card that plays those streams.
         await _async_register_card(hass)
+        # Sweep any downloaded clips that have outlived the retention setting.
+        await async_prune_recordings(hass)
 
     # Check EZVIZ cloud account entity is present, reload
     # cloud account entities for camera entity change
@@ -191,6 +193,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: EzvizConfigEntry) -> bo
         other.entry_id != entry.entry_id and other.data.get(CONF_TYPE) == ATTR_TYPE_CLOUD
         for other in hass.config_entries.async_loaded_entries(DOMAIN)
     ):
-        # The last account is going: drop the cached recordings and their files.
+        # The last account is going: forget the day lists. Downloaded clips stay
+        # in the media folder until their retention sweeps them.
         await async_close_store(hass)
     return unloaded

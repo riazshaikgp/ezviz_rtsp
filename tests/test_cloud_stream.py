@@ -694,12 +694,25 @@ async def test_options_menu_and_video_step() -> None:
         "stream",
         "release",
         "snapshots",
+        "recordings",
         "stream_address",
         "video",
         "codes",
     ]
     result = await flow.async_step_video({"transcode": True})
     assert result["data"]["transcode"] is True
+
+
+async def test_options_recordings_step_sets_retention() -> None:
+    flow, entry = _options_flow({})
+    entry.options = {"linger": 5}
+    form = await flow.async_step_recordings()
+    assert form["type"] == "form"
+    assert form["step_id"] == "recordings"
+    result = await flow.async_step_recordings({"recordings_keep_days": 30})
+    assert result["data"]["recordings_keep_days"] == 30
+    # Other options are kept.
+    assert result["data"]["linger"] == 5
 
 
 async def test_options_stream_address_step_shows_addresses_and_rotates() -> None:

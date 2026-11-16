@@ -12,11 +12,16 @@ This project follows [Semantic Versioning](https://semver.org/).
   tap in the card. Behind it are two websocket commands
   (`ezviz_rtsp/recordings`, `ezviz_rtsp/recording/clip`) and an authenticated
   MP4 view with range requests. A recording is fetched from the camera through
-  the EZVIZ cloud only when it is tapped, kept in a small cache (16 clips), and
+  the EZVIZ cloud only when it is tapped, saved as an MP4 under Home Assistant's
+  media folder (`media/ezviz_rtsp/`, browsable under **Media → My media**), and
   served as the camera's own HEVC to browsers that play it or as H.264 converted
   by Home Assistant to the rest. A sleeping camera's first SD search is retried
   once after 5 s (EZVIZ error 2009, as for `capture_picture`). See
   [Recordings on the SD card](README.md#recordings-on-the-sd-card).
+- **A retention setting for downloaded recordings.** Under **Configure →
+  Downloaded recordings** you choose how many days those MP4s are kept
+  (default 7, `0` keeps them). Older files are swept at start-up and whenever a
+  new clip is downloaded.
 
 ### Changed
 - Requires **pyezvizapi 2.0.0** (was 1.0.5.0), which added SD playback through

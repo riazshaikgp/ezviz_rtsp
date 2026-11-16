@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import time
 import zlib
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
@@ -161,12 +165,27 @@ def test_ffmpeg_args_copy_hevc_or_encode_h264() -> None:
         assert args[-2:] == ("-f", "mp4")
 
 
+def test_media_root_uses_the_media_dirs_setting() -> None:
+    config = SimpleNamespace(
+        media_dirs={"local": "/media"}, path=lambda *parts: "/config/" + "/".join(parts)
+    )
+    hass = SimpleNamespace(config=config)
+    assert rec_module.media_root(hass) == Path("/media") / DOMAIN
+    # With no media dir configured it falls back to <config>/media.
+    config.media_dirs = {}
+    assert rec_module.media_root(hass) == Path("/config/media") / DOMAIN
+
+
 # -- on a real hass (needs the HA test harness, so Linux) -------------------------
 
 
 
 @pytest.fixture
-def _cloud(enable_custom_integrations):
+def _cloud(enable_custom_integrations, hass, tmp_path):
+    # Downloaded clips live under the media folder; point it at a per-test
+    # directory so runs don't see each other's files (the HA test config dir is
+    # shared).
+    hass.config.media_dirs = {"local": str(tmp_path)}
     yield
 
 
@@ -254,12 +273,15 @@ async def test_websocket_lists_a_day_and_hands_out_a_clip(
     )
     assert (await ws.receive_json())["error"]["code"] == "recording_failed"
 
-    # Unloading the account drops the cache directory.
+    # The clip lives under the media folder and survives an unload.
     root = rec_module.get_store(hass).root
-    assert root.exists()
+    clip_file = root / f"BK1_{newest['begin']}_{newest['end']}_hevc.mp4"
+    assert root == rec_module.media_root(hass)
+    assert clip_file.exists()
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    assert not root.exists()
+    assert clip_file.exists()
+    assert rec_module.DATA_RECORDINGS not in hass.data
 
 
 async def test_clip_refused_while_the_camera_streams_live(hass, _cloud) -> None:
@@ -274,3 +296,38 @@ async def test_clip_refused_while_the_camera_streams_live(hass, _cloud) -> None:
         with pytest.raises(rec_module.RecordingError, match="streaming live"):
             await rec_module.async_get_clip(hass, camera, begin, begin + timedelta(seconds=8), "h264")
         download.assert_not_called()
+
+
+async def test_downloaded_clips_are_reindexed_after_a_restart(hass, _cloud) -> None:
+    await _setup_with_index(hass, [])
+    store = rec_module.get_store(hass)
+    clip = store.root / "BK1_20261110T080000Z_20261110T080008Z_h264.mp4"
+    clip.write_bytes(b"mp4")
+
+    # A restart forgets the store; the next use rebuilds the index from the folder.
+    await rec_module.async_close_store(hass)
+    assert rec_module.DATA_RECORDINGS not in hass.data
+    again = rec_module.get_store(hass)
+    assert again.clips[("BK1", "20261110T080000Z", "20261110T080008Z", "h264")] == clip
+
+
+async def test_downloaded_clips_are_pruned_by_retention(hass, _cloud) -> None:
+    await _setup_with_index(hass, [])
+    store = rec_module.get_store(hass)
+    fresh = store.root / "BK1_20261110T080000Z_20261110T080008Z_h264.mp4"
+    stale = store.root / "BK1_20261101T080000Z_20261101T080008Z_h264.mp4"
+    fresh.write_bytes(b"fresh")
+    stale.write_bytes(b"stale")
+    ten_days_ago = time.time() - 10 * 86400
+    os.utime(stale, (ten_days_ago, ten_days_ago))
+
+    # The default keeps a week: the ten-day-old clip is swept, the new one stays.
+    assert await rec_module.async_prune_recordings(hass) == 1
+    assert fresh.exists() and not stale.exists()
+
+    # 0 keeps them until they are removed by hand.
+    stale.write_bytes(b"stale")
+    os.utime(stale, (ten_days_ago, ten_days_ago))
+    with patch.object(rec_module, "_keep_days", return_value=0):
+        assert await rec_module.async_prune_recordings(hass) == 0
+    assert stale.exists()

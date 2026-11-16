@@ -56,6 +56,7 @@ from .const import (
     CONF_LINGER,
     CONF_MAX_SESSION,
     CONF_MFA,
+    CONF_RECORDINGS_KEEP_DAYS,
     CONF_RFSESSION_ID,
     CONF_SERIAL,
     CONF_SESSION_ID,
@@ -66,6 +67,7 @@ from .const import (
     DEFAULT_AUTO_SNAPSHOT,
     DEFAULT_CAMERA_USERNAME,
     DEFAULT_FFMPEG_ARGUMENTS,
+    DEFAULT_RECORDINGS_KEEP_DAYS,
     DEFAULT_SNAPSHOT_INTERVAL,
     DEFAULT_TIMEOUT,
     DOMAIN,
@@ -498,6 +500,7 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
                 "stream",
                 "release",
                 "snapshots",
+                "recordings",
                 "stream_address",
                 "video",
                 "codes",
@@ -776,6 +779,46 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
                     probatio.Optional(
                         CONF_TRANSCODE, default=options.get(CONF_TRANSCODE, True)
                     ): BooleanSelector()
+                }
+            ),
+        )
+
+    async def async_step_recordings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """How long downloaded recordings are kept under Home Assistant's media folder.
+
+        A recording the card plays is saved as an MP4 in ``media/ezviz_rtsp``; this
+        is how many days those files stay before they are swept. ``0`` keeps them
+        until they are removed by hand.
+        """
+        options = self.config_entry.options
+        if user_input is not None:
+            return self.async_create_entry(
+                title="",
+                data={
+                    **options,
+                    CONF_RECORDINGS_KEEP_DAYS: int(user_input[CONF_RECORDINGS_KEEP_DAYS]),
+                },
+            )
+        return self.async_show_form(
+            step_id="recordings",
+            data_schema=probatio.Schema(
+                {
+                    probatio.Optional(
+                        CONF_RECORDINGS_KEEP_DAYS,
+                        default=options.get(
+                            CONF_RECORDINGS_KEEP_DAYS, DEFAULT_RECORDINGS_KEEP_DAYS
+                        ),
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0,
+                            max=365,
+                            step=1,
+                            mode=NumberSelectorMode.BOX,
+                            unit_of_measurement="d",
+                        )
+                    )
                 }
             ),
         )

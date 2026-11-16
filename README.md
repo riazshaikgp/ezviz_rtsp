@@ -416,10 +416,15 @@ max_height: 360                # optional; height of the list in pixels
   integration asks once more after 5 seconds. A short clip takes about
   **15–30 seconds** to arrive — most of it the camera waking up, then a few
   seconds of conversion.
-- **Caching.** A fetched recording is kept in Home Assistant (the last 16, as
-  MP4 files in a private temporary folder that is removed when the integration
-  unloads), so seeking and playing it again don't touch the camera. A past
-  day's list is kept until you press refresh; today's for a minute.
+- **Where the clips go.** A fetched recording is saved as an MP4 under Home
+  Assistant's **media** folder, in `media/ezviz_rtsp/`, so seeking and playing it
+  again don't touch the camera. You can browse and download the files from
+  **Media → My media → ezviz_rtsp**, and they survive a restart. A past day's
+  list is kept until you press refresh; today's for a minute.
+- **How long they stay.** Under **Configure → Downloaded recordings** you choose
+  how many days those MP4s are kept (default **7**); older files are deleted,
+  the rest left alone. `0` keeps them until you delete them yourself. The folder
+  is swept at start-up and whenever a new clip is downloaded.
 - **Format.** The camera records **H.265/HEVC**. Safari (and the iOS/macOS
   Home Assistant apps) and most Chrome and Edge builds on Windows and macOS play
   it as is; the integration only repackages it as MP4. Firefox and browsers
@@ -444,8 +449,10 @@ Playback asks the VTM relay — the same relay as the live view — to stream th
 chosen interval from the SD card; the integration collects it as MPEG-PS,
 converts it with ffmpeg to an MP4 with the index at the front, and serves it to
 the card from an authenticated view that supports range requests (seeking).
-The card reaches the file through a short-lived signed path, handed out by the
-websocket command that prepared it.
+The MP4 is kept under `media/ezviz_rtsp/` (see [How long they
+stay](#what-it-costs-and-what-to-expect)), so a second play doesn't wake the
+camera again. The card reaches the file through a short-lived signed path,
+handed out by the websocket command that prepared it.
 
 Two websocket commands carry it, for anyone building their own UI:
 

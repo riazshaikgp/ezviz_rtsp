@@ -10,8 +10,10 @@ EZVIZ cloud can do two things with that card the mobile app relies on:
   SD playback. ``_download_clip`` reads one interval as MPEG-PS (pyezvizapi),
   and ffmpeg turns it into an MP4 the browser can play: the original HEVC
   copied as is for browsers that play HEVC, or re-encoded to H.264 for the
-  rest. Finished clips are kept in a small cache on disk, so seeking (HTTP
-  range requests) and a second play don't wake the camera again.
+  rest. Finished clips are kept as MP4 files under Home Assistant's media
+  folder, so seeking (HTTP range requests) and a second play don't wake the
+  camera again, and they survive a restart until the retention setting (how
+  many days to keep) removes the ones that have aged out.
 
 Both go through the camera: a sleeping battery camera is woken for a replay, so
 the card only ever fetches a clip when someone taps it.
@@ -24,8 +26,6 @@ import base64
 import contextlib
 import json
 import logging
-import shutil
-import tempfile
 import time
 import zlib
 from collections import OrderedDict
@@ -37,10 +37,17 @@ from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 from aiohttp import web
+from homeassistant.const import CONF_TYPE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.http import KEY_HASS, HomeAssistantView
 
-from .const import CONF_CODES, DOMAIN
+from .const import (
+    ATTR_TYPE_CLOUD,
+    CONF_CODES,
+    CONF_RECORDINGS_KEEP_DAYS,
+    DEFAULT_RECORDINGS_KEEP_DAYS,
+    DOMAIN,
+)
 
 if TYPE_CHECKING:
     from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
@@ -69,8 +76,6 @@ CLIP_SOCKET_TIMEOUT = 30.0
 CLIP_MAX_BYTES = 96 * 1024 * 1024
 # A recording longer than this is not a clip; refuse it rather than stream an hour.
 MAX_CLIP_SECONDS = 15 * 60
-# Finished MP4s kept on disk (per Home Assistant instance), oldest dropped first.
-CACHE_CLIPS = 16
 _FFMPEG_TIMEOUT = 120
 
 FORMATS = ("hevc", "h264")
@@ -91,7 +96,7 @@ class _Day:
 
 @dataclass
 class RecordingStore:
-    """Per Home Assistant: the day lists, the clip cache and its locks."""
+    """Per Home Assistant: the day lists, the clip index and its locks."""
 
     root: Path
     days: dict[tuple[str, date], _Day] = field(default_factory=dict)
@@ -108,21 +113,96 @@ class RecordingStore:
 DATA_RECORDINGS = f"{DOMAIN}_recordings"
 
 
+def media_root(hass: HomeAssistant) -> Path:
+    """The folder under Home Assistant's media directory that keeps the clips."""
+    dirs = getattr(hass.config, "media_dirs", None) or {}
+    base = dirs.get("local") or hass.config.path("media")
+    return Path(base) / DOMAIN
+
+
+def _key_from_name(name: str) -> tuple[str, str, str, str] | None:
+    """The clip key of an MP4 file name, or None when it is not one of ours."""
+    if not name.endswith(".mp4"):
+        return None
+    parts = name[:-4].rsplit("_", 3)
+    if len(parts) != 4 or parts[3] not in FORMATS:
+        return None
+    return parts[0], parts[1], parts[2], parts[3]
+
+
+def _index_clips(store: RecordingStore) -> None:
+    """Fill the clip index from the MP4s already in the media folder.
+
+    Runs on the first use after a restart, so a clip downloaded earlier is
+    served again without waking the camera.
+    """
+    try:
+        files = sorted(store.root.glob("*.mp4"), key=lambda path: path.stat().st_mtime)
+    except OSError:
+        return
+    for path in files:
+        key = _key_from_name(path.name)
+        if key is not None:
+            store.clips[key] = path
+
+
 def get_store(hass: HomeAssistant) -> RecordingStore:
-    """The recording store, made on first use with a private clip directory."""
+    """The recording store, made on first use over Home Assistant's media folder."""
     store: RecordingStore | None = hass.data.get(DATA_RECORDINGS)
     if store is None:
-        root = Path(tempfile.mkdtemp(prefix=f"{DOMAIN}_clips_"))
+        root = media_root(hass)
+        root.mkdir(parents=True, exist_ok=True)
         store = RecordingStore(root)
+        _index_clips(store)
         hass.data[DATA_RECORDINGS] = store
     return store
 
 
+def _keep_days(hass: HomeAssistant) -> int:
+    """How many days downloaded clips are kept; 0 keeps them forever."""
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.data.get(CONF_TYPE) == ATTR_TYPE_CLOUD:
+            try:
+                return int(
+                    entry.options.get(
+                        CONF_RECORDINGS_KEEP_DAYS, DEFAULT_RECORDINGS_KEEP_DAYS
+                    )
+                )
+            except (TypeError, ValueError):
+                break
+    return DEFAULT_RECORDINGS_KEEP_DAYS
+
+
+def _prune(root: Path, keep_days: int) -> list[str]:
+    """Delete the MP4s downloaded more than ``keep_days`` ago. Blocking."""
+    if keep_days <= 0:
+        return []
+    cutoff = time.time() - keep_days * 86400
+    removed: list[str] = []
+    for path in root.glob("*.mp4"):
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+                removed.append(path.name)
+        except OSError:
+            pass
+    return removed
+
+
+async def async_prune_recordings(hass: HomeAssistant) -> int:
+    """Drop the downloaded clips past their retention; returns how many went."""
+    store = get_store(hass)
+    removed = await hass.async_add_executor_job(_prune, store.root, _keep_days(hass))
+    for name in removed:
+        key = _key_from_name(name)
+        if key is not None:
+            store.clips.pop(key, None)
+    return len(removed)
+
+
 async def async_close_store(hass: HomeAssistant) -> None:
-    """Drop the cache and its directory (the last entry is unloading)."""
-    store: RecordingStore | None = hass.data.pop(DATA_RECORDINGS, None)
-    if store is not None:
-        await hass.async_add_executor_job(shutil.rmtree, store.root, True)
+    """Forget the in-memory lists; the downloaded clips stay in the media folder."""
+    hass.data.pop(DATA_RECORDINGS, None)
 
 
 # -- finding a camera ------------------------------------------------------------
@@ -483,9 +563,9 @@ async def _async_fetch(
     )
     store.clips[key] = target
     store.clips.move_to_end(key)
-    while len(store.clips) > CACHE_CLIPS:
-        _, old = store.clips.popitem(last=False)
-        await hass.async_add_executor_job(old.unlink, True)
+    # Clips are kept until the retention setting ages them out; a download is a
+    # good moment to sweep, since the folder is on disk anyway.
+    await async_prune_recordings(hass)
     return target
 
 
@@ -509,11 +589,10 @@ class RecordingClipView(HomeAssistantView):
     async def get(
         self, request: web.Request, serial: str, begin: str, end: str, fmt: str
     ) -> web.StreamResponse:
-        """The clip's file, or 404 once it has left the cache."""
+        """The clip's file, or 404 once retention has removed it."""
         hass = request.app[KEY_HASS]
-        store: RecordingStore | None = hass.data.get(DATA_RECORDINGS)
-        path = store.clips.get((serial, begin, end, fmt)) if store is not None else None
-        if path is None:
+        path = get_store(hass).clips.get((serial, begin, end, fmt))
+        if path is None or not path.is_file():
             raise web.HTTPNotFound
         return web.FileResponse(
             path, headers={"Content-Type": "video/mp4", "Cache-Control": "private, max-age=3600"}

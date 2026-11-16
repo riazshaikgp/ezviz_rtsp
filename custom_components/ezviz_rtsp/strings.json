@@ -203,6 +203,7 @@
           "general": "General",
           "release": "Release the camera after",
           "snapshots": "Snapshots",
+          "recordings": "Downloaded recordings",
           "stream": "Maximum stream duration",
           "video": "Video transcoding",
           "stream_address": "Stream address for other apps"
@@ -230,6 +231,16 @@
         },
         "description": "Only cameras with video encryption turned on need a code. It decrypts the cloud live stream inside Home Assistant, so it never reaches a browser. Cameras marked ✓ already have one.",
         "title": "Verification codes"
+      },
+      "recordings": {
+        "data": {
+          "recordings_keep_days": "Keep downloaded recordings for (days)"
+        },
+        "data_description": {
+          "recordings_keep_days": "A recording the card plays is saved as an MP4 under Home Assistant's media folder (media/ezviz_rtsp). Files older than this many days are deleted; 0 keeps them until you remove them yourself."
+        },
+        "description": "Recordings you play in the card are downloaded once and kept under Home Assistant's media folder, so seeking and playing them again do not wake the camera. This is how long those files stay.",
+        "title": "Downloaded recordings"
       },
       "video": {
         "data": {

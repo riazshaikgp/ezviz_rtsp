@@ -25,6 +25,7 @@ CONF_SNAPSHOT_INTERVAL = "snapshot_interval"  # minimum seconds between automati
 CONF_STREAM_TOKEN = "stream_token"  # guards the live address other apps read
 CONF_STREAM_ENABLED = "stream_enabled"  # whether other apps may read those addresses
 CONF_INTERNAL_TOKEN = "internal_token"  # guards the card's own picture address
+CONF_RECORDINGS_KEEP_DAYS = "recordings_keep_days"  # days downloaded clips stay in /media
 DATA_LIVE_VIEW = f"{DOMAIN}_live_view_registered"
 DATA_CARD = f"{DOMAIN}_card_registered"
 DATA_WS = f"{DOMAIN}_ws_registered"
@@ -57,6 +58,7 @@ SERVICE_CAPTURE_PICTURE = "capture_picture"
 SIGNAL_PICTURE_CAPTURED = "ezviz_rtsp_picture_captured_{}"
 DEFAULT_AUTO_SNAPSHOT = True
 DEFAULT_SNAPSHOT_INTERVAL = 300
+DEFAULT_RECORDINGS_KEEP_DAYS = 7
 SERVICE_DETECTION_SENSITIVITY = "set_alarm_detection_sensibility"
 
 # Defaults
