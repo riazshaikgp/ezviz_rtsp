@@ -72,11 +72,19 @@ CHANNEL = 1
 # A sleeping camera answers its first search with EZVIZ error 2009; retry once after this long.
 WAKE_RETRY_SECONDS = 5.0
 
-# Replay: give up if the camera hasn't delivered the whole clip in this time
-# (it may first have to wake up), and call a clip finished once no data came
-# for IDLE seconds after the first packet.
+# Replay: the minimum time the relay gets to deliver a clip (it may first have
+# to wake the camera). A longer recording needs a longer window, since the relay
+# reads the SD card at a finite speed: the window grows with the clip's own
+# length, and once no data came for IDLE seconds after the first packet the clip
+# is taken as finished.
 CLIP_DEADLINE = 90.0
-CLIP_IDLE = 4.0
+CLIP_TRANSFER_RATE = 2.0
+CLIP_TRANSFER_GRACE = 60.0
+CLIP_IDLE = 10.0
+# A clip shorter than this many seconds of the interval on the card is not the
+# whole recording: fetch it once more before serving it.
+CLIP_SHORTFALL = 1.5
+CLIP_TRANSFER_ATTEMPTS = 2
 # The socket's own timeout must outlast a camera waking up.
 CLIP_SOCKET_TIMEOUT = 30.0
 CLIP_MAX_BYTES = 96 * 1024 * 1024
@@ -89,6 +97,8 @@ PLAYBACK_ATTEMPTS = 3
 PLAYBACK_RETRY_SECONDS = 2.0
 # A recording longer than this is not a clip; refuse it rather than stream an hour.
 MAX_CLIP_SECONDS = 15 * 60
+# The longest transfer window a retried clip may ever get.
+MAX_TRANSFER_SECONDS = MAX_CLIP_SECONDS * CLIP_TRANSFER_RATE + CLIP_TRANSFER_GRACE
 _FFMPEG_TIMEOUT = 120
 # A clip watched with "save watched recordings" off lives this long in the
 # temporary folder before the sweep removes it (the signed address lives an hour).
@@ -592,6 +602,73 @@ def _open_playback(
     raise last
 
 
+def _transfer_budget(seconds: float) -> float:
+    """How long the relay may take to deliver a recording of ``seconds``.
+
+    The relay reads the camera's SD card at a finite speed, so the old fixed
+    window cut long recordings: a clip that took longer than the window arrived
+    half-downloaded. The window now grows with the interval, with a minimum that
+    covers a camera waking up and a cap for the longest clip allowed.
+    """
+    wanted = seconds * CLIP_TRANSFER_RATE + CLIP_TRANSFER_GRACE
+    return min(max(CLIP_DEADLINE, wanted), MAX_TRANSFER_SECONDS)
+
+
+def _read_playback(stream: Any, deadline: float) -> bytearray:
+    """Read one playback stream to its end (or until ``deadline``). Blocking."""
+    from pyezvizapi.streaming.cloud.protocol import VtmStreamEOF, VtmStreamTimeout
+
+    data = bytearray()
+
+    def take(**limits: Any) -> int:
+        taken = 0
+        for packet in stream.iter_packets(
+            duration_seconds=max(deadline - time.monotonic(), 1.0),
+            duration_from_start=True,
+            **limits,
+        ):
+            if packet.encrypted:
+                raise RecordingError("The camera sent the clip on an encrypted channel")
+            data.extend(packet.body)
+            taken += 1
+            if len(data) > CLIP_MAX_BYTES:
+                raise RecordingError("The recording is too large to play here")
+        return taken
+
+    try:
+        # A sleeping camera takes a while to send its first packet: wait for it
+        # against the whole deadline. pyezvizapi's idle timer runs from the start
+        # of iteration, so it only applies afterwards, when IDLE seconds without
+        # data mean the clip is over.
+        if take(first_packet_deadline=deadline, max_packets=1):
+            take(stream_packet_timeout_seconds=CLIP_IDLE)
+    except VtmStreamEOF:
+        pass
+    except VtmStreamTimeout:
+        if not data:
+            raise
+    return data
+
+
+def _delivered_seconds(data: bytes) -> float | None:
+    """The video PTS span of a captured MPEG-PS clip, when it can be measured."""
+    from pyezvizapi.streaming.media.mpegps import mpeg_ps_video_pts_span_seconds
+
+    return mpeg_ps_video_pts_span_seconds(data, max_gap_seconds=2.0)
+
+
+def _short_by(span: float, wanted: float) -> float:
+    """How much of the interval the camera did not send, within a tolerance.
+
+    The SD index and the file it names can differ by a fraction of a second (the
+    camera often closes the file a little early), so only a real shortfall is
+    worth another fetch: at least ``CLIP_SHORTFALL`` seconds or 5% of the clip.
+    """
+    missing = wanted - span
+    allowed = max(CLIP_SHORTFALL, wanted * 0.05)
+    return missing if missing > allowed else 0.0
+
+
 def _download_clip(
     client: Any, serial: str, begin: str, end: str, timezone: str, code: str | None
 ) -> bytes:
@@ -599,50 +676,59 @@ def _download_clip(
 
     pyezvizapi's own ``save_clip`` refuses a clip whose video falls a fraction
     of a second short of the requested range (the camera often closes the file
-    early), so this reads the relay directly and keeps whatever arrived.
+    early), so this reads the relay directly and keeps whatever arrived. A clip
+    that arrives clearly shorter than the interval is fetched once more, because
+    a short transfer usually means the relay stalled rather than a short file.
     """
     from pyezvizapi.exceptions import EzvizPlaybackNegotiationError, PyEzvizError
-    from pyezvizapi.streaming.cloud.protocol import (
-        VtmStreamEOF,
-        VtmStreamTimeout,
-        decrypt_hikvision_ps_video,
-    )
+    from pyezvizapi.streaming.cloud.protocol import decrypt_hikvision_ps_video
 
-    deadline = time.monotonic() + CLIP_DEADLINE
-    data = bytearray()
+    wanted = (parse_stamp(end) - parse_stamp(begin)).total_seconds()
+    budget = _transfer_budget(wanted)
+    data: bytearray | None = None
+    span: float | None = None
     try:
-        stream = _open_playback(client, serial, begin, end, timezone, deadline)
-        try:
-            def _take(**limits: Any) -> int:
-                taken = 0
-                for packet in stream.iter_packets(
-                    duration_seconds=max(deadline - time.monotonic(), 1.0),
-                    duration_from_start=True,
-                    **limits,
-                ):
-                    if packet.encrypted:
-                        raise RecordingError("The camera sent the clip on an encrypted channel")
-                    data.extend(packet.body)
-                    taken += 1
-                    if len(data) > CLIP_MAX_BYTES:
-                        raise RecordingError("The recording is too large to play here")
-                return taken
-
+        for attempt in range(1, CLIP_TRANSFER_ATTEMPTS + 1):
+            started = time.monotonic()
+            deadline = started + budget
+            stream = _open_playback(client, serial, begin, end, timezone, deadline)
             try:
-                # A sleeping camera takes a while to send its first packet: wait
-                # for it against the whole deadline. pyezvizapi's idle timer runs
-                # from the start of iteration, so it only applies afterwards, when
-                # IDLE seconds without data mean the clip is over.
-                if _take(first_packet_deadline=deadline, max_packets=1):
-                    _take(stream_packet_timeout_seconds=CLIP_IDLE)
-            except VtmStreamEOF:
-                pass
-            except VtmStreamTimeout:
-                if not data:
-                    raise
-        finally:
-            with contextlib.suppress(OSError):
-                stream.close()
+                data = _read_playback(stream, deadline)
+            finally:
+                with contextlib.suppress(OSError):
+                    stream.close()
+            span = _delivered_seconds(bytes(data))
+            missing = 0.0 if span is None else _short_by(span, wanted)
+            _LOGGER.debug(
+                "Recording %s %s-%s: %.1f of %.1f s from the camera in %.1f s (attempt %d)",
+                serial,
+                begin,
+                end,
+                span or 0.0,
+                wanted,
+                time.monotonic() - started,
+                attempt,
+            )
+            if not missing:
+                break
+            if attempt >= CLIP_TRANSFER_ATTEMPTS:
+                _LOGGER.warning(
+                    "Recording %s %s-%s: the camera sent %.1f s of the %.1f s in the list",
+                    serial,
+                    begin,
+                    end,
+                    span or 0.0,
+                    wanted,
+                )
+                break
+            budget = min(budget * 2, MAX_TRANSFER_SECONDS)
+            _LOGGER.debug(
+                "Recording %s %s-%s: %.1f s short; fetching again with a longer window",
+                serial,
+                begin,
+                end,
+                missing,
+            )
     except EzvizPlaybackNegotiationError as err:
         raise RecordingError(
             f"The camera refused to play the recording (code {err.result_code}); "

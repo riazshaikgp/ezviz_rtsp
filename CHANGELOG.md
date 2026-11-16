@@ -71,6 +71,14 @@ This project follows [Semantic Versioning](https://semver.org/).
   taking the server's cache, and today's list is read again when it is more than
   a minute old. Reopening the view sooner still uses the cached list, and ⟳
   always re-reads.
+- **A long recording is no longer cut short.** The transfer from the relay used
+  to give up after a fixed 90 seconds, so a recording that took longer to arrive
+  was converted and played only up to that point — a video shorter than the
+  length in the list. The window now grows with the recording (with a minimum
+  that still covers a camera waking up), a pause between packets is tolerated
+  longer, and a clip that arrives clearly shorter than its interval is fetched
+  once more before it is served. The row's length also follows the file once it
+  plays, with the listed length in its tooltip when they differ.
 - **A camera busy with another viewer (EZVIZ 5405) gets a few seconds.** Playback
   is retried twice, two seconds apart, before the card shows the error — enough
   for the relay to release a live session the card just stopped. The message now

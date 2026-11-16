@@ -685,6 +685,76 @@ def test_playback_negotiation_gives_up_when_the_camera_stays_busy(monkeypatch) -
     assert len(sleeps) == rec_module.PLAYBACK_ATTEMPTS - 1
 
 
+def test_transfer_window_grows_with_a_long_recording() -> None:
+    # A short clip keeps the minimum, enough for the camera to wake up.
+    assert rec_module._transfer_budget(10) == rec_module.CLIP_DEADLINE
+    # A minute needs more than the old fixed 90 s window, which used to cut it.
+    assert rec_module._transfer_budget(60) > rec_module.CLIP_DEADLINE
+    # The longest allowed clip still gets a bounded window.
+    assert (
+        rec_module._transfer_budget(rec_module.MAX_CLIP_SECONDS)
+        == rec_module.MAX_TRANSFER_SECONDS
+    )
+
+
+def test_a_fraction_short_is_not_a_shortfall() -> None:
+    # The camera often closes the file a fraction early; that is not a retry.
+    assert rec_module._short_by(11.4, 12) == 0
+    assert rec_module._short_by(118, 120) == 0
+    # A real gap is.
+    assert rec_module._short_by(9.0, 12) > 0
+    assert rec_module._short_by(100, 120) > 0
+
+
+def test_a_short_download_is_fetched_once_more(monkeypatch) -> None:
+    opener = MagicMock(side_effect=[MagicMock(), MagicMock()])
+    monkeypatch.setattr(rec_module, "_open_playback", opener)
+    monkeypatch.setattr(
+        rec_module,
+        "_read_playback",
+        MagicMock(side_effect=[bytearray(b"PS1"), bytearray(b"PS2")]),
+    )
+    spans = MagicMock(side_effect=[5.0, 12.0])
+    monkeypatch.setattr(rec_module, "_delivered_seconds", spans)
+
+    clip = rec_module._download_clip(
+        MagicMock(),
+        "BK1",
+        "20261110T080000Z",
+        "20261110T080012Z",
+        "Africa/Johannesburg",
+        None,
+    )
+
+    assert clip == b"PS2"
+    assert opener.call_count == 2
+    assert spans.call_count == 2
+    first_deadline = opener.call_args_list[0].args[-1]
+    second_deadline = opener.call_args_list[1].args[-1]
+    assert second_deadline > first_deadline
+
+
+def test_a_whole_download_is_not_fetched_twice(monkeypatch) -> None:
+    opener = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(rec_module, "_open_playback", opener)
+    monkeypatch.setattr(
+        rec_module, "_read_playback", MagicMock(return_value=bytearray(b"PS"))
+    )
+    monkeypatch.setattr(rec_module, "_delivered_seconds", MagicMock(return_value=12.0))
+
+    clip = rec_module._download_clip(
+        MagicMock(),
+        "BK1",
+        "20261110T080000Z",
+        "20261110T080012Z",
+        "Africa/Johannesburg",
+        None,
+    )
+
+    assert clip == b"PS"
+    assert opener.call_count == 1
+
+
 async def test_flat_clips_are_migrated_into_day_folders(hass, _cloud) -> None:
     await _setup_with_index(hass, [])
     store = await rec_module.async_get_store(hass)

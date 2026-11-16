@@ -1381,6 +1381,21 @@ class EzvizVideoCard extends HTMLElement {
       this._render();
       const video = this._ensureClipVideo();
       video.src = result.url;
+      video.onloadedmetadata = () => {
+        // The camera's index can be a second or two off the file it sends;
+        // once the player knows the real length, show that in the row.
+        if (gen !== this._clipGen || this._selected !== rec) return;
+        const seconds = Math.round(video.duration);
+        if (!Number.isFinite(seconds) || seconds <= 0) return;
+        const listed = rec.seconds;
+        rec.seconds = seconds;
+        const len = this.shadowRoot.querySelector(".recRow.on .len");
+        if (!len) return;
+        len.textContent = `${seconds} s`;
+        if (seconds !== listed) {
+          len.title = `The camera sent ${seconds} s of the ${listed} s listed`;
+        }
+      };
       video.onerror = () => {
         if (this._clipFormat === "hevc" && this._selected === rec) {
           this._playRecording(rec, true);

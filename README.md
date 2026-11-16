@@ -703,6 +703,21 @@ camera's storage in the EZVIZ app: the card may need formatting, or replacing.
 </details>
 
 <details>
+<summary>A recording is shorter than the length shown next to it</summary>
+
+The length in the list comes from the camera's SD index. The camera can close
+the file a fraction of a second before the index says it ends; once the clip
+plays, the card replaces the row's length with the file's real duration (hover
+it to see both). A clip that arrives clearly short is fetched once more
+automatically, and the transfer window now grows with the recording, so a long
+clip is not cut off while it is still arriving. If a clip is still much shorter,
+the camera itself sent a shorter file; the integration log
+(`custom_components.ezviz_rtsp.recordings`) says how many seconds it received
+and how many the index listed.
+
+</details>
+
+<details>
 <summary>A recording won't play</summary>
 
 "The camera refused to play the recording" means another session still has the
