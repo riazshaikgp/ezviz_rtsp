@@ -63,10 +63,17 @@ class LiveSource:
             stream = open_cloud_stream(
                 self._client, self._serial, channel=self._channel, timeout=self._timeout
             )
-            stream.start()
         except PyEzvizError as err:
             raise EzvizStreamError(f"Live stream failed: {err}") from err
         except OSError as err:
+            raise EzvizStreamError(f"Live stream failed: {err}") from err
+        try:
+            stream.start()
+        except (PyEzvizError, OSError) as err:
+            # The session is open by now: close it, or the camera keeps a session
+            # it will not hand out again (EZVIZ refuses parallel ones).
+            with contextlib.suppress(Exception):
+                stream.close()
             raise EzvizStreamError(f"Live stream failed: {err}") from err
         with self._lock:
             self._stream = stream

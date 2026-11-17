@@ -124,9 +124,9 @@ class EzvizNumber(EzvizBaseEntity, NumberEntity):
 
         except EzvizAuthTokenExpired, EzvizAuthVerificationCode:
             _LOGGER.debug("Failed to login to EZVIZ API")
-            self.hass.async_create_task(
-                self.hass.config_entries.async_reload(self.config_entry_id)
-            )
+            # Runs in the executor (async_device_update): add_job is the
+            # thread-safe way to reach the loop, async_create_task is not.
+            self.hass.add_job(self.hass.config_entries.async_reload, self.config_entry_id)
             return
 
         except (InvalidURL, HTTPError, PyEzvizError) as error:

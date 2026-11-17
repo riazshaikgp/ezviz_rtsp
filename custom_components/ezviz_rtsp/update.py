@@ -36,7 +36,7 @@ async def async_setup_entry(
         EzvizUpdateEntity(coordinator, camera, sensor, UPDATE_ENTITY_TYPES)
         for camera in coordinator.data
         for sensor, value in coordinator.data[camera].items()
-        if sensor in UPDATE_ENTITY_TYPES.key
+        if sensor == UPDATE_ENTITY_TYPES.key
         if value
     )
 

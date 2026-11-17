@@ -91,7 +91,7 @@ class EzvizLight(EzvizEntity, LightEntity):
 
         except (HTTPError, PyEzvizError) as err:
             raise HomeAssistantError(
-                f"Failed to turn on light {self._attr_name}"
+                f"Failed to turn on light {self.name}"
             ) from err
 
     @override
@@ -109,7 +109,7 @@ class EzvizLight(EzvizEntity, LightEntity):
 
         except (HTTPError, PyEzvizError) as err:
             raise HomeAssistantError(
-                f"Failed to turn off light {self._attr_name}"
+                f"Failed to turn off light {self.name}"
             ) from err
 
     @callback

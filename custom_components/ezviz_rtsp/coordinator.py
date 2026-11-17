@@ -73,3 +73,9 @@ class EzvizDataUpdateCoordinator(DataUpdateCoordinator):
 
         except (InvalidURL, HTTPError, PyEzvizError) as error:
             raise UpdateFailed(f"Invalid response from API: {error}") from error
+
+        except TimeoutError as error:
+            # asyncio.timeout raises a bare TimeoutError; without this it reaches
+            # DataUpdateCoordinator as an unexpected error and logs a traceback
+            # every interval instead of a clean "update failed".
+            raise UpdateFailed(f"The EZVIZ API did not answer in time: {error}") from error

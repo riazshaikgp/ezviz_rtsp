@@ -74,7 +74,11 @@ class EzvizSirenEntity(EzvizBaseEntity, SirenEntity, RestoreEntity):
         self._attr_is_on = last_state.state == STATE_ON
 
         if self._attr_is_on:
-            evt.async_call_later(self.hass, OFF_DELAY, self.off_delay_listener)
+            # Keep the cancel handle, or a later turn-on/turn-off cannot cancel
+            # this restored timer and it flips the state off early.
+            self._delay_listener = evt.async_call_later(
+                self.hass, OFF_DELAY, self.off_delay_listener
+            )
 
     @override
     async def async_turn_off(self, **kwargs: Any) -> None:

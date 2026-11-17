@@ -245,8 +245,11 @@ class LiveStream:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
-        # A task cancelled before it ran never told its readers.
-        self._task = None
+        # A task cancelled before it ran never told its readers. Forget it only
+        # if it is still ours: a new reader may have started another task while
+        # this one was being awaited, and that one must stay tracked.
+        if self._task is task:
+            self._task = None
         for queue in self._readers:
             queue.put_nowait(None)
         _LOGGER.info("Live view of %s stopped (the camera is needed elsewhere)", self.serial)
@@ -264,8 +267,10 @@ class LiveStream:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-            # A task cancelled before it ran never told its readers.
-            self._task = None
+            # A task cancelled before it ran never told its readers. Forget it
+            # only if it is still the one we cancelled.
+            if self._task is task:
+                self._task = None
             for queue in self._readers:
                 queue.put_nowait(None)
 
@@ -321,6 +326,12 @@ class LiveStream:
         except asyncio.CancelledError:
             closed = True  # on purpose; a linger stop without video already cooled down
             raise
+        except Exception as err:
+            # Anything unexpected (the pack splitter, a decoder) would otherwise
+            # leave the readers with a plain end: no error to show and no
+            # cooldown, so the camera would be woken again at once.
+            _LOGGER.exception("Live stream of %s failed", self.serial)
+            end = EzvizStreamError(str(err) or type(err).__name__)
         finally:
             self._task = None
             if self._deadline is not None:

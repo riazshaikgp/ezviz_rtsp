@@ -67,6 +67,23 @@ This project follows [Semantic Versioning](https://semver.org/).
   the month was last checked and whether the check was complete.
 
 ### Fixed
+- **A handful of integration internals are fixed.** Turning a light on or off no
+  longer fails with a confusing `AttributeError` when the call itself fails (the
+  message used an attribute Home Assistant never sets). A live stream that fails
+  in the middle now hands the error to the card and sets the cooldown, instead
+  of looking like a normal end (which re-woke the camera at once), and a stream
+  that fails to open closes the session it had already started, so the camera
+  does not keep one that EZVIZ then refuses to hand out again. A slow EZVIZ API
+  is a clean "update failed" instead of a full traceback every 30 s, a restored
+  siren's auto-off timer can be cancelled again, and the sensitivity number
+  reloads the entry from a safe thread after a token expiry.
+- **The downloaded-clip index no longer empties when the media folder cannot be
+  read.** One folder that could not be listed — or a file that vanished while the
+  folder was being walked — used to leave the whole index empty, so every saved
+  clip looked absent and was fetched from the camera again, waking it and reading
+  its SD card for nothing. The walk now keeps everything it found before the
+  trouble. The list of temporary clips watched with saving off is also cleared as
+  its files age out, instead of growing for the whole run.
 - **The picture box takes the camera's own shape before the first clip, so
   nothing moves at any screen size.** A recording's box used to change from the
   card's fixed 16:9 to the camera's shape only once the player had read the

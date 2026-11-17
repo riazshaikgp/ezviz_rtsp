@@ -621,6 +621,48 @@ def test_temp_clips_are_swept_after_their_short_life(tmp_path) -> None:
     assert not stale.exists()
 
 
+def test_an_unreadable_folder_keeps_the_rest_of_the_index(
+    tmp_path, monkeypatch
+) -> None:
+    """One folder that cannot be listed must not leave the whole index empty.
+
+    An empty index makes every saved clip look absent, so each one is fetched
+    from the camera again - waking it and reading its SD card for nothing.
+    """
+    root = tmp_path / "media"
+    folder = root / "2026" / "11" / "16"
+    folder.mkdir(parents=True)
+    good = folder / "BK1_20261116T080000Z_20261116T080008Z_h264.mp4"
+    good.write_bytes(b"mp4")
+
+    def walk(_self, _pattern):
+        yield good
+        raise OSError("a folder that cannot be listed")
+
+    monkeypatch.setattr(Path, "rglob", walk)
+
+    store = rec_module._prepare_store(root, TZ)
+
+    assert ("BK1", "20261116T080000Z", "20261116T080008Z", "h264") in store.clips
+
+
+async def test_retention_forgets_temp_clips_whose_file_is_gone(
+    hass, _cloud, tmp_path, monkeypatch
+) -> None:
+    """The temp index must not keep an entry for every clip ever watched."""
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    monkeypatch.setattr(rec_module, "temp_root", lambda _hass: tmp_path)
+    kept = tmp_path / "kept.mp4"
+    kept.write_bytes(b"mp4")
+    store.temp[("BK1", "b1", "e1", "h264")] = kept
+    store.temp[("BK1", "b2", "e2", "h264")] = tmp_path / "gone.mp4"
+
+    await rec_module.async_prune_recordings(hass)
+
+    assert list(store.temp) == [("BK1", "b1", "e1", "h264")]
+
+
 async def test_clip_refused_while_the_camera_streams_live(hass, _cloud) -> None:
     entry, _ = await _setup_with_index(hass, [])
     camera = rec_module.find_camera(hass, "BK1")

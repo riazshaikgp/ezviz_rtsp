@@ -231,6 +231,14 @@ def _clip_path(store: RecordingStore, key: tuple[str, str, str, str]) -> Path:
     return store.root / _clip_folder(store.tz, key[1]) / _clip_name(key)
 
 
+def _mtime(path: Path) -> float:
+    """A file's modification time, or 0 when it cannot be read. Blocking."""
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def _prepare_store(root: Path, tz: tzinfo) -> RecordingStore:
     """Make the media folder and index the MP4s already in it. Blocking.
 
@@ -241,10 +249,14 @@ def _prepare_store(root: Path, tz: tzinfo) -> RecordingStore:
     """
     root.mkdir(parents=True, exist_ok=True)
     store = RecordingStore(root, tz)
-    try:
-        files = sorted(root.rglob("*.mp4"), key=lambda path: path.stat().st_mtime)
-    except OSError:
-        return store
+    # Index whatever can be read. A folder that cannot be listed stops the walk
+    # but keeps what was found before it: an empty index would fetch every saved
+    # clip from the camera again. A file that vanishes mid-walk is handled by
+    # ``_mtime`` below.
+    files: list[Path] = []
+    with contextlib.suppress(OSError):
+        files.extend(root.rglob("*.mp4"))
+    files.sort(key=_mtime)
     for path in files:
         key = _key_from_name(path.name)
         if key is None:
@@ -308,6 +320,16 @@ def _prepare_temp_root(root: Path) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     _sweep_temp(root)
     return root
+
+
+def _forget_gone_temp(store: RecordingStore) -> None:
+    """Forget temp clips whose file the sweep has already removed. Blocking.
+
+    The disk sweep alone would leave one index entry per clip ever watched in
+    memory for the whole run, so a long uptime would grow without a bound.
+    """
+    for key in [key for key, path in store.temp.items() if not path.is_file()]:
+        store.temp.pop(key, None)
 
 
 def _saved_temp(root: Path, key: tuple[str, str, str, str]) -> Path | None:
@@ -602,6 +624,8 @@ async def async_prune_recordings(hass: HomeAssistant) -> int:
             store.clips.pop(key, None)
     # Clips watched with saving off are only kept for a couple of hours.
     await hass.async_add_executor_job(_sweep_temp, temp_root(hass))
+    if store.temp:
+        await hass.async_add_executor_job(_forget_gone_temp, store)
     return len(removed)
 
 
@@ -1255,7 +1279,7 @@ def _download_clip(
 
     wanted = (parse_stamp(end) - parse_stamp(begin)).total_seconds()
     budget = _transfer_budget(wanted)
-    data: bytearray | None = None
+    raw: bytes | None = None
     span: float | None = None
     try:
         for attempt in range(1, CLIP_TRANSFER_ATTEMPTS + 1):
@@ -1270,11 +1294,15 @@ def _download_clip(
                     progress(delivered, wanted, attempt)
 
             try:
-                data = _read_playback(stream, deadline, report)
+                ps = _read_playback(stream, deadline, report)
             finally:
                 with contextlib.suppress(OSError):
                     stream.close()
-            span = _delivered_seconds(bytes(data))
+            # One immutable copy serves both the length check and the returned
+            # clip: a long recording can run to tens of megabytes, so it is not
+            # copied once per attempt and then again for the result.
+            raw = bytes(ps)
+            span = _delivered_seconds(raw)
             report(span)
             missing = 0.0 if span is None else _short_by(span, wanted)
             _LOGGER.debug(
@@ -1314,15 +1342,12 @@ def _download_clip(
             "elsewhere, then try again."
         ) from err
     except (PyEzvizError, OSError) as err:
-        if isinstance(err, RecordingError):
-            raise
         raise RecordingError(f"The recording could not be played: {err}") from err
-    if not data:
+    if not raw:
         raise RecordingError("The camera sent no video for this recording")
-    clip = bytes(data)
     if code:
-        clip = decrypt_hikvision_ps_video(clip, code, nalu_header_size=None)
-    return clip
+        return decrypt_hikvision_ps_video(raw, code, nalu_header_size=None)
+    return raw
 
 
 def ffmpeg_args(fmt: str) -> tuple[str, ...]:
@@ -1356,9 +1381,15 @@ async def _async_to_mp4(ffmpeg_bin: str, ps: bytes, fmt: str, target: Path) -> N
         async with asyncio.timeout(_FFMPEG_TIMEOUT):
             _, err = await proc.communicate(ps)
     except TimeoutError as exc:
-        proc.kill()
-        await proc.wait()
         raise RecordingError("Converting the recording took too long") from exc
+    finally:
+        # The caller can be cancelled (the card closes the view, the websocket
+        # request goes away): never leave ffmpeg running behind it.
+        if proc.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.wait()
     if proc.returncode != 0:
         message = err.decode(errors="replace").strip().splitlines()
         raise RecordingError(
