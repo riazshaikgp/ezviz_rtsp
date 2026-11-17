@@ -418,11 +418,13 @@ day of a camera's recordings and plays the one you tap, right in the card.
   player with ✕. When it arrives the player replaces the progress bar in place:
   the list, the page and the row you clicked stay where they were (picking a
   row does not rebuild the card either, so the list does not jump back to its
-  top, and the first clip taking the camera's shape does not nudge the list
-  either). The picture
+  top). The picture
   box takes the recording's own shape (a 4:3 doorbell clip fills the card's
   width instead of showing black bands at the sides), and the live picture does
-  the same. While the clip is on its way the card shows a **progress bar**
+  the same. The shape is measured from the camera's own idle picture as soon as
+  the card appears — no extra request, the poster is the same frame — so the box
+  is already the right height when the first clip starts and nothing shifts, on
+  any screen size. While the clip is on its way the card shows a **progress bar**
   with the seconds received out of the recording's length, followed by
   "Converting the recording…"; the list stays at the row you tapped instead of
   jumping back to the top. The bar follows the video timestamps the camera

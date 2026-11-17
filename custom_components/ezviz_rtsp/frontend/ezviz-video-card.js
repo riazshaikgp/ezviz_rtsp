@@ -570,6 +570,11 @@ class EzvizVideoCard extends HTMLElement {
     this._posterShown = undefined;
     this._posterEl = null;
     this._whenEl = null;
+    // The picture box's shape, learned from the camera's own picture before the
+    // first clip plays, so the card never changes height under the reader. It
+    // also survives a rebuild, so switching a day does not resize the card.
+    this._mediaRatio = null; // the applied "w / h" (or "1 / 1" when portrait)
+    this._ratioProbe = null; // the poster URL whose size has been measured
 
     // SD-card recordings mode: the list replaces the live view until the button
     // is pressed again. It is read only when the mode is opened (listing wakes
@@ -650,6 +655,9 @@ class EzvizVideoCard extends HTMLElement {
       this._calendarMonth = null;
       this._days = {};
       this._daysError = "";
+      // Another camera may have another shape: measure its picture again.
+      this._mediaRatio = null;
+      this._ratioProbe = null;
     }
     this._stop();
     this._state = "idle";
@@ -960,6 +968,7 @@ class EzvizVideoCard extends HTMLElement {
       this._media.prepend(this._posterEl);
     }
     this._posterEl.style.backgroundImage = `url("${url}")`;
+    this._probePosterRatio(url);
   }
 
   // The date and time of the picture currently on the card (motion or
@@ -1109,6 +1118,9 @@ class EzvizVideoCard extends HTMLElement {
     // Media
     const media = document.createElement("div");
     media.className = "media";
+    // A card rebuilt after the shape was learned starts at the right height, so
+    // switching a day (or live and the recordings) never resizes the picture.
+    if (this._mediaRatio) media.style.aspectRatio = this._mediaRatio;
     this._media = media;
     // The day bar is updated in place when only its label changes.
     this._recDayEl = null;
@@ -1124,6 +1136,7 @@ class EzvizVideoCard extends HTMLElement {
       this._posterEl = layer;
     }
     this._posterShown = poster;
+    if (poster) this._probePosterRatio(poster);
 
     this._snapshotChipEl = null;
     this._whenEl = null;
@@ -2139,33 +2152,66 @@ class EzvizVideoCard extends HTMLElement {
     };
   }
 
-  // The card's picture box is 16:9, but a camera often records in 4:3 (many
-  // doorbells do), so object-fit: contain left black bands at the sides. Take
-  // the source's own shape instead, and the picture fills the card's width.
+  // The idle picture is the camera's own frame, so its shape is the camera's:
+  // measuring it once tells the card how tall the picture box should be before
+  // any clip or live stream loads. Without this the box sat at the 16:9 default
+  // until the first clip, and its growth then nudged the list - and on a screen
+  // large enough that the dashboard has slack and does not scroll at all, there
+  // is no scroll range to compensate with.
+  _probePosterRatio(url) {
+    if (!url || url === this._ratioProbe) return;
+    this._ratioProbe = url;
+    // createElement rather than ``new Image()``: the same thing, and it works
+    // in the test environment too.
+    const probe = document.createElement("img");
+    probe.onload = () => {
+      if (this._ratioProbe !== url) return; // a newer picture replaced it
+      // A running stream (or a clip) owns the box; leave its shape alone.
+      if (this._media?.querySelector("video, img")) return;
+      // No scroll compensation: this runs while the page is settling, usually
+      // with the reader at the top, and there is no place to preserve yet.
+      this._setMediaRatio(probe.naturalWidth, probe.naturalHeight, null, false);
+    };
+    probe.src = url;
+  }
+
+  // The picture box takes the source's own shape: no letterboxing, and the
+  // card's height is right before anything starts playing. Returns whether the
+  // shape is portrait (whose object-fit is "cover", not "contain").
+  _setMediaRatio(width, height, element, compensate = true) {
+    const media = this._media;
+    const portrait = Boolean(width && height && height > width);
+    if (element) element.style.objectFit = portrait ? "cover" : "contain";
+    if (!media || !width || !height) return portrait;
+    const ratio = portrait ? "1 / 1" : `${width} / ${height}`;
+    if (this._mediaRatio === ratio) return portrait;
+    this._mediaRatio = ratio;
+    // Growing (or shrinking) the picture pushes whatever is below it down (up).
+    // If any of that is on screen the reader sees it move - the list jumping
+    // when the first clip of a session takes the camera's own shape instead of
+    // the card's fixed 16:9. Follow the change with the scroll so what is on
+    // screen stays put. The condition is "something below the picture is
+    // visible", true both when the picture has scrolled above the viewport and
+    // when only its lower edge is off the bottom of a large screen.
+    const box = media.getBoundingClientRect();
+    const before = box.height;
+    const below = box.bottom < (window.innerHeight || 0) + 1;
+    media.style.aspectRatio = ratio;
+    const grown = media.getBoundingClientRect().height - before;
+    if (compensate && below && Math.abs(grown) > 1) this._scrollBy(grown);
+    return portrait;
+  }
+
+  // The card's picture box starts at 16:9, but a camera often records in 4:3
+  // (many doorbells do), so object-fit: contain left black bands at the sides.
+  // Take the source's own shape instead, and the picture fills the card's width.
   _fitMediaTo(element) {
     const media = this._media;
     if (!media || !media.contains(element)) return;
     const width = Number(element.videoWidth || element.naturalWidth);
     const height = Number(element.videoHeight || element.naturalHeight);
     if (!width || !height) return;
-    const box = media.getBoundingClientRect();
-    // When the picture is above what the reader is looking at, growing it would
-    // push the list down under them (the first clip after a page load changes
-    // the box from 16:9 to the camera's own shape). Follow the change with the
-    // scroll, so the list stays exactly where it was.
-    const above = box.top < 0;
-    const before = box.height;
-    if (width >= height) {
-      media.style.aspectRatio = `${width} / ${height}`;
-      element.style.objectFit = "contain";
-    } else {
-      // A portrait stream must not make the card taller than a square: crop
-      // instead of showing bands above and below.
-      media.style.aspectRatio = "1 / 1";
-      element.style.objectFit = "cover";
-    }
-    const grown = media.getBoundingClientRect().height - before;
-    if (above && Math.abs(grown) > 1) this._scrollBy(grown);
+    this._setMediaRatio(width, height, element);
   }
 
   // Repaint the picture area for the clip's current state. Rebuilding the card
