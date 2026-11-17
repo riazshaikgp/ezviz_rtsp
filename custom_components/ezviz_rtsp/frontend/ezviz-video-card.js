@@ -408,11 +408,14 @@ const style = /* css */ `
   .calDay .dot {
     position: absolute; left: 50%; bottom: 3px; width: 4px; height: 4px;
     margin-left: -2px; border-radius: 50%;
+    /* A thin ring in the card's own colour keeps the dot clear of the day's
+       fill when that day is selected (its background is the primary colour), so
+       a blue SD dot no longer has to turn pale to stay visible. On an unselected
+       day the ring matches the cell's background and is not seen. */
+    box-shadow: 0 0 0 1.5px var(--card-background-color, var(--ha-card-background, #fff));
   }
   .calDay .dot.local { background: var(--success-color, #43a047); }
   .calDay .dot.card { background: var(--primary-color, #03a9f4); }
-  .calDay.on .dot.local { background: #a5d6a7; }
-  .calDay.on .dot.card { background: #b3e5fc; }
   .calFoot {
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     font-size: 11px; line-height: 16px; color: var(--secondary-text-color);

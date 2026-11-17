@@ -277,6 +277,12 @@ This project follows [Semantic Versioning](https://semver.org/).
   Assistant's `.storage` (`ezviz_rtsp.sd_days`) and restored with the media
   index, so the dots are there as soon as the calendar is opened, and old days
   are dropped as the entry is rewritten.
+- **The selected day's dot keeps its colour.** A day's dot used to be lightened
+  when that day was the selected one, so it would not vanish into the day's
+  primary-coloured fill — a blue SD dot then read as a pale, greenish dot. The
+  dot now keeps its real colour and carries a thin ring in the card's background
+  colour, which separates it from the selected day's fill without changing what
+  the dot means.
 
 ### Changed
 - **Downloaded recordings are kept per account.** The retention setting under
