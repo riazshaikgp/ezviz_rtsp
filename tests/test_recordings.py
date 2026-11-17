@@ -1388,6 +1388,33 @@ async def test_a_persisted_day_is_parsed_only_when_it_is_opened(
     assert len(index.calls) == 1
 
 
+async def test_seen_days_survive_a_restart(hass, _cloud, hass_storage) -> None:
+    """The calendar's blue dots must come back after a restart, without reopening."""
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    tz = ZoneInfo("Africa/Johannesburg")
+    yesterday = datetime.now(tz).date() - timedelta(days=1)
+    start = datetime.combine(yesterday, datetime.min.time()) + timedelta(hours=8)
+    _entry, index = await _setup_with_index(hass, [start])
+    camera = rec_module.find_camera(hass, "BK1")
+    await rec_module.async_list_day(hass, camera, yesterday)
+    assert "ezviz_rtsp.sd_days" in hass_storage, "the day is written to storage"
+
+    # A restart forgets the in-memory set; the stored days bring the dot back.
+    hass.data.pop(rec_module.DATA_RECORDINGS)
+    hass.data.pop(rec_module.DATA_SEEN)
+    hass.data.pop(rec_module.DATA_SEEN_STORE)
+    hass.data.pop(rec_module.DATA_LISTS)
+    hass.data.pop(rec_module.DATA_LISTS_STORE)
+    store = await rec_module.async_get_store(hass)
+    assert ("BK1", yesterday) in store.seen
+
+    days = await rec_module.async_month_days(
+        hass, camera, yesterday.year, yesterday.month, scan=False
+    )
+    assert yesterday.isoformat() in days["card"]
+    assert len(index.calls) == 1, "the dot comes from storage, not a camera read"
+
+
 async def test_an_empty_finished_day_is_not_read_again(
     hass, _cloud, hass_storage
 ) -> None:

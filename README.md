@@ -448,13 +448,15 @@ day of a camera's recordings and plays the one you tap, right in the card.
 - **The calendar marks the days that have a recording.** A **green dot** means
   clips from that day are already saved in the media folder — those days are
   known without touching the camera and survive every restart. Days with
-  recordings only on the camera's SD card get a **blue dot**, which needs the
-  camera to be asked: press **Check the SD card for this month** in the picker
-  and it searches each day of that month once, showing progress and how long the
-  result is kept. The answer is stored in Home Assistant's `.storage`, so after
-  a restart the dots are back without waking the camera; a scan that runs out of
-  time keeps the days it found and can be run again. The camera is never asked
-  about a month just by opening the picker.
+  recordings only on the camera's SD card get a **blue dot**. Opening such a day
+  marks it, and the mark is saved in Home Assistant's `.storage`
+  (`ezviz_rtsp.sd_days`), so its dot is back after a restart too. To see a whole
+  month's dots without opening each day, press **Check the SD card for this
+  month** in the picker and it searches each day of that month once, showing
+  progress and how long the result is kept; that answer is stored as well, so
+  after a restart those dots are back without waking the camera. A scan that
+  runs out of time keeps the days it found and can be run again. The camera is
+  never asked about a month just by opening the picker.
 - At the right of each row, a small icon says where the clip is: a **cloud** for
   one that still has to be fetched from the camera, a green **check** for one
   already saved under `media/ezviz_rtsp/` (in either format), and an orange

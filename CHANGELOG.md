@@ -270,6 +270,13 @@ This project follows [Semantic Versioning](https://semver.org/).
   long clip), because the camera often closes an event file one or two seconds
   early — a 12-second event arriving as 11 s of video is no longer treated as a
   cut-off download.
+- **The calendar's blue dots survive a restart.** A day was marked with a blue
+  dot as soon as its SD list was seen to hold recordings, but that set lived only
+  in memory: after every Home Assistant restart the blue dots were gone and came
+  back only when each day was opened again. The days are now saved in Home
+  Assistant's `.storage` (`ezviz_rtsp.sd_days`) and restored with the media
+  index, so the dots are there as soon as the calendar is opened, and old days
+  are dropped as the entry is rewritten.
 
 ### Changed
 - **Downloaded recordings are kept per account.** The retention setting under
