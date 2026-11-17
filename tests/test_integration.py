@@ -166,6 +166,31 @@ async def test_battery_camera_sets_up_and_offers_a_cloud_stream(hass) -> None:
     assert hass.services.has_service(DOMAIN, "set_alarm_detection_sensibility")
 
 
+async def test_an_entity_goes_unavailable_when_its_camera_leaves(hass) -> None:
+    """A camera that leaves the account must not raise on every poll.
+
+    The entity stays loaded, so ``data`` and ``available`` are read on each
+    coordinator update; a missing camera used to raise ``KeyError`` there.
+    """
+    entry = await _setup(hass)
+    camera_id = hass.states.async_entity_ids("camera")[0]
+    entity = hass.data["entity_components"][Platform.CAMERA].get_entity(camera_id)
+    coordinator = entry.runtime_data
+
+    assert entity.available is True
+    assert entity.data["name"] == "Door"
+
+    # The camera is gone from the next poll: reads are empty, not a KeyError.
+    coordinator.data = {}
+    assert entity.data == {}
+    assert entity.available is False
+
+    # A failed poll makes the entity unavailable even with data present.
+    coordinator.data = CAM_DATA
+    coordinator.last_update_success = False
+    assert entity.available is False
+
+
 async def test_request_snapshot_button_updates_the_snapshot_image(hass) -> None:
     await _setup(hass)
     snapshot_id = next(

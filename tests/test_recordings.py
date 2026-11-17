@@ -1134,6 +1134,74 @@ def test_a_short_download_is_fetched_once_more(monkeypatch) -> None:
     assert second_deadline > first_deadline
 
 
+def test_a_failed_retry_keeps_the_first_read(monkeypatch) -> None:
+    """A short first read must survive a retry that then fails."""
+    from pyezvizapi.exceptions import PyEzvizError
+
+    opener = MagicMock(side_effect=[MagicMock(), PyEzvizError("the relay dropped")])
+    monkeypatch.setattr(rec_module, "_open_playback", opener)
+    monkeypatch.setattr(
+        rec_module, "_read_playback", MagicMock(return_value=bytearray(b"PS1"))
+    )
+    monkeypatch.setattr(rec_module, "_delivered_seconds", MagicMock(return_value=8.0))
+
+    clip = rec_module._download_clip(
+        MagicMock(),
+        "BK1",
+        "20261110T080000Z",
+        "20261110T080012Z",
+        "Africa/Johannesburg",
+        None,
+    )
+
+    assert clip == b"PS1"
+    assert opener.call_count == 2
+
+
+def test_a_shorter_retry_does_not_replace_a_longer_read(monkeypatch) -> None:
+    opener = MagicMock(side_effect=[MagicMock(), MagicMock()])
+    monkeypatch.setattr(rec_module, "_open_playback", opener)
+    monkeypatch.setattr(
+        rec_module,
+        "_read_playback",
+        MagicMock(side_effect=[bytearray(b"PS1"), bytearray(b"PS2")]),
+    )
+    monkeypatch.setattr(
+        rec_module, "_delivered_seconds", MagicMock(side_effect=[8.0, 6.0])
+    )
+
+    clip = rec_module._download_clip(
+        MagicMock(),
+        "BK1",
+        "20261110T080000Z",
+        "20261110T080012Z",
+        "Africa/Johannesburg",
+        None,
+    )
+
+    assert clip == b"PS1"
+    assert opener.call_count == 2
+
+
+def test_two_failed_reads_raise(monkeypatch) -> None:
+    from pyezvizapi.exceptions import PyEzvizError
+
+    monkeypatch.setattr(rec_module, "_open_playback", MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        rec_module, "_read_playback", MagicMock(side_effect=PyEzvizError("gone"))
+    )
+
+    with pytest.raises(rec_module.RecordingError):
+        rec_module._download_clip(
+            MagicMock(),
+            "BK1",
+            "20261110T080000Z",
+            "20261110T080012Z",
+            "Africa/Johannesburg",
+            None,
+        )
+
+
 def test_a_whole_download_is_not_fetched_twice(monkeypatch) -> None:
     opener = MagicMock(return_value=MagicMock())
     monkeypatch.setattr(rec_module, "_open_playback", opener)

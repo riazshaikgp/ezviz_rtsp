@@ -312,19 +312,19 @@ class EzvizCamera(EzvizEntity, Camera):
     @override
     def is_on(self) -> bool:
         """Return true if on."""
-        return bool(self.data["status"])
+        return bool(self.data.get("status"))
 
     @property
     @override
     def is_recording(self) -> bool:
         """Return true if the device is recording."""
-        return self.data["alarm_notify"]
+        return bool(self.data.get("alarm_notify"))
 
     @property
     @override
     def motion_detection_enabled(self) -> bool:
         """Camera Motion Detection Status."""
-        return self.data["alarm_notify"]
+        return bool(self.data.get("alarm_notify"))
 
     @override
     def enable_motion_detection(self) -> None:
@@ -395,7 +395,8 @@ class EzvizCamera(EzvizEntity, Camera):
             return stream_source(self.hass, self._live)
         if self._password is None:
             return None
-        local_ip = self.data["local_ip"]
+        if (local_ip := self.data.get("local_ip")) is None:
+            return None
         self._rtsp_stream = (
             f"rtsp://{self._username}:{self._password}@"
             f"{local_ip}:{self._local_rtsp_port}{self._ffmpeg_arguments}"

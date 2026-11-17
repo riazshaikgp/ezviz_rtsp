@@ -35,9 +35,10 @@ class EzvizSelectEntityDescription(SelectEntityDescription):
 
 def alarm_sound_mode_current_option(ezvizSelect: EzvizSelect) -> str | None:
     """Return the selected entity option to represent the entity state."""
-    sound_mode_value = getattr(
-        SoundMode, ezvizSelect.data[ezvizSelect.entity_description.key]
-    ).value
+    sound_mode = ezvizSelect.data.get(ezvizSelect.entity_description.key)
+    if sound_mode is None:
+        return None
+    sound_mode_value = getattr(SoundMode, sound_mode).value
     if sound_mode_value in [0, 1, 2]:
         return ezvizSelect.options[sound_mode_value]
 
@@ -65,7 +66,7 @@ ALARM_SOUND_MODE_SELECT_TYPE = EzvizSelectEntityDescription(
 
 def battery_work_mode_current_option(ezvizSelect: EzvizSelect) -> str | None:
     """Return the selected entity option to represent the entity state."""
-    value = ezvizSelect.data[ezvizSelect.entity_description.key]
+    value = ezvizSelect.data.get(ezvizSelect.entity_description.key)
     # pyezvizapi >= 1.0.4 reports the raw mode number instead of its name.
     try:
         battery_work_mode = (

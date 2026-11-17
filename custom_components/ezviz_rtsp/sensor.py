@@ -106,7 +106,7 @@ class EzvizSensor(EzvizEntity, SensorEntity):
     @override
     def native_value(self) -> int | str:
         """Return the state of the sensor."""
-        return self.data[self._sensor_name]
+        return self.data.get(self._sensor_name)
 
 
 class EzvizLatestRecording(EzvizEntity, SensorEntity):

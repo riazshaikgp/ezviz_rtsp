@@ -1273,31 +1273,43 @@ def _download_clip(
     early), so this reads the relay directly and keeps whatever arrived. A clip
     that arrives clearly shorter than the interval is fetched once more, because
     a short transfer usually means the relay stalled rather than a short file.
+    The longest read of every attempt is kept: a retry that fails, or comes back
+    even shorter, must not throw away a nearly complete first read.
     """
     from pyezvizapi.exceptions import EzvizPlaybackNegotiationError, PyEzvizError
     from pyezvizapi.streaming.cloud.protocol import decrypt_hikvision_ps_video
 
     wanted = (parse_stamp(end) - parse_stamp(begin)).total_seconds()
     budget = _transfer_budget(wanted)
-    raw: bytes | None = None
-    span: float | None = None
-    try:
-        for attempt in range(1, CLIP_TRANSFER_ATTEMPTS + 1):
-            started = time.monotonic()
-            deadline = started + budget
+    best: bytes | None = None
+    best_span: float | None = None
+    best_missing: float | None = None
+    error: RecordingError | None = None
+
+    for attempt in range(1, CLIP_TRANSFER_ATTEMPTS + 1):
+        started = time.monotonic()
+        deadline = started + budget
+        stream = None
+
+        def report(
+            delivered: float | None, attempt: int = attempt, wanted: float = wanted
+        ) -> None:
+            if progress is not None:
+                progress(delivered, wanted, attempt)
+
+        try:
             stream = _open_playback(client, serial, begin, end, timezone, deadline)
-
-            def report(
-                delivered: float | None, attempt: int = attempt, wanted: float = wanted
-            ) -> None:
-                if progress is not None:
-                    progress(delivered, wanted, attempt)
-
-            try:
-                ps = _read_playback(stream, deadline, report)
-            finally:
-                with contextlib.suppress(OSError):
-                    stream.close()
+            ps = _read_playback(stream, deadline, report)
+        except EzvizPlaybackNegotiationError as err:
+            error = RecordingError(
+                f"The camera refused to play the recording (code {err.result_code}); "
+                "it is busy with another viewer. Close the EZVIZ app or the live view "
+                "elsewhere, then try again."
+            )
+        except (PyEzvizError, OSError) as err:
+            error = RecordingError(f"The recording could not be played: {err}")
+        else:
+            error = None
             # One immutable copy serves both the length check and the returned
             # clip: a long recording can run to tens of megabytes, so it is not
             # copied once per attempt and then again for the result.
@@ -1315,39 +1327,66 @@ def _download_clip(
                 time.monotonic() - started,
                 attempt,
             )
+            if best_missing is None or missing < best_missing:
+                best, best_span, best_missing = raw, span, missing
             if not missing:
                 break
-            if attempt >= CLIP_TRANSFER_ATTEMPTS:
-                _LOGGER.warning(
-                    "Recording %s %s-%s: the camera sent %.1f s of the %.1f s in the list",
+            if attempt < CLIP_TRANSFER_ATTEMPTS:
+                budget = min(budget * 2, MAX_TRANSFER_SECONDS)
+                _LOGGER.debug(
+                    "Recording %s %s-%s: %.1f s short; fetching again with a longer window",
                     serial,
                     begin,
                     end,
-                    span or 0.0,
-                    wanted,
+                    missing,
                 )
-                break
-            budget = min(budget * 2, MAX_TRANSFER_SECONDS)
-            _LOGGER.debug(
-                "Recording %s %s-%s: %.1f s short; fetching again with a longer window",
+                continue
+            _LOGGER.warning(
+                "Recording %s %s-%s: the camera sent %.1f s of the %.1f s in the list",
                 serial,
                 begin,
                 end,
-                missing,
+                span or 0.0,
+                wanted,
             )
-    except EzvizPlaybackNegotiationError as err:
-        raise RecordingError(
-            f"The camera refused to play the recording (code {err.result_code}); "
-            "it is busy with another viewer. Close the EZVIZ app or the live view "
-            "elsewhere, then try again."
-        ) from err
-    except (PyEzvizError, OSError) as err:
-        raise RecordingError(f"The recording could not be played: {err}") from err
-    if not raw:
+        finally:
+            if stream is not None:
+                with contextlib.suppress(OSError):
+                    stream.close()
+
+        # A whole read left the loop above; reaching here means this attempt
+        # failed or a last short read finished. Try again only while nothing has
+        # arrived yet - once there is video, a failed retry keeps the best read.
+        if best is None and attempt < CLIP_TRANSFER_ATTEMPTS:
+            _LOGGER.debug(
+                "Recording %s %s-%s: attempt %d failed (%s); trying again",
+                serial,
+                begin,
+                end,
+                attempt,
+                error,
+            )
+            continue
+        if best is not None and error is not None:
+            _LOGGER.debug(
+                "Recording %s %s-%s: attempt %d failed (%s); keeping the %.1f s "
+                "an earlier attempt delivered",
+                serial,
+                begin,
+                end,
+                attempt,
+                error,
+                best_span or 0.0,
+            )
+        break
+
+    if best is None:
+        if error is not None:
+            raise error
         raise RecordingError("The camera sent no video for this recording")
     if code:
-        return decrypt_hikvision_ps_video(raw, code, nalu_header_size=None)
-    return raw
+        return decrypt_hikvision_ps_video(best, code, nalu_header_size=None)
+    return best
 
 
 def ffmpeg_args(fmt: str) -> tuple[str, ...]:

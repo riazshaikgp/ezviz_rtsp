@@ -77,6 +77,17 @@ This project follows [Semantic Versioning](https://semver.org/).
   is a clean "update failed" instead of a full traceback every 30 s, a restored
   siren's auto-off timer can be cancelled again, and the sensitivity number
   reloads the entry from a safe thread after a token expiry.
+- **Entities go unavailable instead of showing stale data, and a camera that
+  leaves the account no longer floods the log.** Every entity now reports
+  unavailable while a poll has failed, and reads its camera's data through a
+  mapping that is empty when the camera is gone, so a removed camera no longer
+  raises `KeyError` on every coordinator update. The light and switch entities,
+  which refresh on every poll, are guarded the same way.
+- **A short recording is kept even when the retry fails.** A clip that arrived
+  clearly shorter than its interval is fetched once more; if that second read
+  fails, or comes back even shorter, the card now plays the longer of the two
+  instead of showing an error, so a nearly complete recording is never thrown
+  away.
 - **The downloaded-clip index no longer empties when the media folder cannot be
   read.** One folder that could not be listed — or a file that vanished while the
   folder was being walked — used to leave the whole index empty, so every saved
