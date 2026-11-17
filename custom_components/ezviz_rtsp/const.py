@@ -28,6 +28,8 @@ CONF_INTERNAL_TOKEN = "internal_token"  # guards the card's own picture address
 CONF_RECORDINGS_KEEP_DAYS = "recordings_keep_days"  # days downloaded clips stay in /media
 DATA_LIVE_VIEW = f"{DOMAIN}_live_view_registered"
 DATA_CARD = f"{DOMAIN}_card_registered"
+DATA_CARD_PATHS = f"{DOMAIN}_card_paths_registered"
+DATA_CARD_LOCK = f"{DOMAIN}_card_lock"
 DATA_WS = f"{DOMAIN}_ws_registered"
 
 # The Lovelace card the integration ships and serves.

@@ -88,6 +88,16 @@ This project follows [Semantic Versioning](https://semver.org/).
   fails, or comes back even shorter, the card now plays the longer of the two
   instead of showing an error, so a nearly complete recording is never thrown
   away.
+- **A live stream cannot leak a reader if Home Assistant is shutting down, and a
+  failed ffmpeg feeder no longer hides why a reader left.** The reader's queue is
+  registered inside the stream's own cleanup, so a failure while starting the
+  background task still takes it back out; a feeder that failed on its own is
+  awaited without re-raising.
+- **Shipping the camera card is retried if it ever fails.** The "card is
+  registered" flag was set before the card was actually read and served, so a
+  failure left the card and its websocket commands missing until Home Assistant
+  restarted. The flag is now set only once everything is in place, and the static
+  paths are remembered separately so a retry cannot add a route twice.
 - **The downloaded-clip index no longer empties when the media folder cannot be
   read.** One folder that could not be listed — or a file that vanished while the
   folder was being walked — used to leave the whole index empty, so every saved
@@ -262,6 +272,18 @@ This project follows [Semantic Versioning](https://semver.org/).
   cut-off download.
 
 ### Changed
+- **Opening a day or the calendar does far less work.** A saved MP4's duration
+  (read from its `mvhd` box, to spot a copy the camera cut short) is now read
+  once and remembered against the file's size and mtime; the calendar's green
+  dots come from an index kept as clips are added and removed instead of a scan
+  of the whole media folder on every open; and the finished days' lists are
+  lifted from storage one at a time as they are opened, so a restart no longer
+  parses hundreds of days of intervals into memory up front.
+- **Dead code is gone, and duplicated rules live in one place.** The unused
+  "snapshot from the live stream" helpers (`async_read`, `async_grab_jpeg`,
+  `async_ps_to_jpeg`, `_ffmpeg`) are removed, and the battery-camera and
+  RTSP-entry predicates that `camera.py` and `live.py` each spelled out are now
+  single helpers.
 - Requires **pyezvizapi 2.5.1** (was 1.0.5.0). 2.0.0 added SD playback through
   the cloud relay, which the recordings need; 2.5.1 is the current release of
   that line and resolves cleanly against Home Assistant's own constraints (it

@@ -27,15 +27,10 @@ class EzvizStreamError(Exception):
     """The cloud live stream could not be opened or read."""
 
 
-class EzvizStreamDecodeError(EzvizStreamError):
-    """ffmpeg found no frame it could decode: a wrong verification code, or a broken stream."""
-
-
 _IMKH_HEADER = 40  # EZVIZ prefixes the MPEG-PS stream with a 40-byte "IMKH" header.
 # MPEG-PS stream types in the program stream map.
 _CODECS = {0x1B: "h264", 0x24: "hevc"}
 _DEFAULT_CODEC = "hevc"
-_FFMPEG_TIMEOUT = 15
 
 
 class LiveSource:
@@ -229,44 +224,6 @@ def decrypt_packs(packs: list[bytes], code: str | None, codec: str) -> list[byte
         out.append(clear[pos : pos + len(pack)])
         pos += len(pack)
     return out
-
-
-async def async_ps_to_jpeg(ps: bytes, ffmpeg_bin: str) -> bytes:
-    """Decode the first frame of an MPEG-PS stream into a JPEG."""
-    jpeg, err = await _ffmpeg(
-        ffmpeg_bin, ps, "-frames:v", "1", "-f", "image2", "-c:v", "mjpeg", "pipe:1"
-    )
-    if not jpeg.startswith(b"\xff\xd8"):
-        raise EzvizStreamDecodeError(f"Could not decode a keyframe: {err or 'no frame decoded'}")
-    return jpeg
-
-
-async def _ffmpeg(ffmpeg_bin: str, ps: bytes, *output: str) -> tuple[bytes, str]:
-    """Run ffmpeg on an MPEG-PS fed through stdin; returns stdout and stderr."""
-    proc = await asyncio.create_subprocess_exec(
-        ffmpeg_bin,
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-f",
-        "mpeg",
-        "-i",
-        "pipe:0",
-        "-map",
-        "0:v:0",
-        *output,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        async with asyncio.timeout(_FFMPEG_TIMEOUT):
-            out, err = await proc.communicate(ps)
-    except TimeoutError as exc:
-        proc.kill()
-        await proc.wait()
-        raise EzvizStreamError("ffmpeg did not finish in time") from exc
-    return out, err.decode(errors="replace").strip()
 
 
 def _decrypt(ps: bytes, code: str, codec: str) -> bytes:

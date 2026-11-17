@@ -655,11 +655,11 @@ def test_camera_uses_the_cloud_stream_without_rtsp() -> None:
 
 
 def test_battery_camera_is_detected() -> None:
-    from custom_components.ezviz_rtsp.camera import _is_battery_camera
+    from custom_components.ezviz_rtsp.live import is_battery_camera
 
-    assert _is_battery_camera({"battery_level": 52})
-    assert _is_battery_camera({"battery_camera_work_mode": 5})
-    assert not _is_battery_camera({"local_ip": "1.2.3.4"})
+    assert is_battery_camera({"battery_level": 52})
+    assert is_battery_camera({"battery_camera_work_mode": 5})
+    assert not is_battery_camera({"local_ip": "1.2.3.4"})
 
 
 def _cloud_camera(coordinator, hass) -> object:

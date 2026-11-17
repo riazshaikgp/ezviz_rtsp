@@ -11,7 +11,7 @@ from homeassistant.components import ffmpeg
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.components.ffmpeg import get_ffmpeg_manager
 from homeassistant.components.stream import CONF_USE_WALLCLOCK_AS_TIMESTAMPS
-from homeassistant.config_entries import SOURCE_IGNORE, SOURCE_INTEGRATION_DISCOVERY
+from homeassistant.config_entries import SOURCE_INTEGRATION_DISCOVERY
 from homeassistant.const import CONF_IP_ADDRESS, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, ServiceResponse, SupportsResponse, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -49,7 +49,7 @@ from .const import (
 )
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
 from .entity import EzvizEntity
-from .live import LiveStream, stream_source
+from .live import LiveStream, is_battery_camera, rtsp_entry, stream_source
 from .recordings import FORMATS, RecordingError, async_download_latest, find_camera
 
 try:
@@ -80,18 +80,6 @@ def _is_wake_timeout(err: Exception) -> bool:
     cover this.)
     """
     return isinstance(err, PyEzvizError) and "'code': 2009" in str(err)
-
-
-def _is_battery_camera(data: dict) -> bool:
-    """Whether a camera runs on battery (no local RTSP, sleeps between wakes).
-
-    EZVIZ reports a battery level or a battery work mode for these; they expose
-    no RTSP server, so the local ``rtsp://`` source can never play them.
-    """
-    return (
-        data.get("battery_level") is not None
-        or data.get("battery_camera_work_mode") is not None
-    )
 
 
 async def async_request_snapshot(
@@ -159,16 +147,12 @@ async def async_setup_entry(
     camera_entities = []
 
     for camera, value in coordinator.data.items():
-        camera_rtsp_entry = [
-            item
-            for item in hass.config_entries.async_entries(DOMAIN)
-            if item.unique_id == camera and item.source != SOURCE_IGNORE
-        ]
+        camera_rtsp_entry = rtsp_entry(hass, camera)
 
-        if camera_rtsp_entry:
-            ffmpeg_arguments = camera_rtsp_entry[0].options[CONF_FFMPEG_ARGUMENTS]
-            camera_username = camera_rtsp_entry[0].data[CONF_USERNAME]
-            camera_password = camera_rtsp_entry[0].data[CONF_PASSWORD]
+        if camera_rtsp_entry is not None:
+            ffmpeg_arguments = camera_rtsp_entry.options[CONF_FFMPEG_ARGUMENTS]
+            camera_username = camera_rtsp_entry.data[CONF_USERNAME]
+            camera_password = camera_rtsp_entry.data[CONF_PASSWORD]
 
             camera_rtsp_stream = f"rtsp://{camera_username}:{camera_password}@{value['local_ip']}:{value['local_rtsp_port']}{ffmpeg_arguments}"
             _LOGGER.debug(
@@ -182,7 +166,7 @@ async def async_setup_entry(
         else:
             # No local RTSP: play the camera through the EZVIZ cloud instead.
             # Battery cameras never answer RTSP, so don't ask for credentials.
-            if not _is_battery_camera(value):
+            if not is_battery_camera(value):
                 discovery_flow.async_create_flow(
                     hass,
                     DOMAIN,
@@ -216,7 +200,7 @@ async def async_setup_entry(
                 camera_rtsp_stream,
                 value["local_rtsp_port"],
                 ffmpeg_arguments,
-                use_cloud=not camera_rtsp_entry,
+                use_cloud=camera_rtsp_entry is None,
             )
         )
 

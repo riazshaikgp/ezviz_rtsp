@@ -159,6 +159,14 @@ class RecordingStore:
     # Downloads in flight, for the card's progress bar: stage, video seconds
     # delivered and the interval's length. Written by the download thread.
     progress: dict[tuple[str, str, str, str], dict[str, Any]] = field(default_factory=dict)
+    # The movie duration read from each saved MP4's ``mvhd``, kept with the size
+    # and mtime the file had when it was read: a saved clip never changes, so a
+    # day's list is not re-read from disk on every open.
+    durations: dict[Path, tuple[int, int, float | None]] = field(default_factory=dict)
+    # Days with at least one saved clip, per camera and month, for the calendar's
+    # green dots. Built once and kept in step by ``_index_clip``/``_drop_clip``,
+    # so opening the calendar is a lookup instead of a scan of every saved clip.
+    local_days: dict[tuple[str, int, int], dict[date, int]] = field(default_factory=dict)
 
     def lock(self, serial: str) -> asyncio.Lock:
         """The lock that serialises SD requests to one camera."""
@@ -231,6 +239,34 @@ def _clip_path(store: RecordingStore, key: tuple[str, str, str, str]) -> Path:
     return store.root / _clip_folder(store.tz, key[1]) / _clip_name(key)
 
 
+def _index_clip(store: RecordingStore, key: tuple[str, str, str, str], path: Path) -> None:
+    """Add a saved clip to the index and to the calendar's day counts.
+
+    The clip index and the calendar's green dots must stay in step, so both are
+    changed here and in ``_drop_clip`` only.
+    """
+    store.clips[key] = path
+    day = parse_stamp(key[1]).astimezone(store.tz).date()
+    month = store.local_days.setdefault((key[0], day.year, day.month), {})
+    month[day] = month.get(day, 0) + 1
+
+
+def _drop_clip(store: RecordingStore, key: tuple[str, str, str, str]) -> None:
+    """Remove a clip from the index and the calendar's day counts."""
+    if store.clips.pop(key, None) is None:
+        return
+    day = parse_stamp(key[1]).astimezone(store.tz).date()
+    month_key = (key[0], day.year, day.month)
+    if (month := store.local_days.get(month_key)) is None:
+        return
+    if (count := month.get(day, 0)) <= 1:
+        month.pop(day, None)
+    else:
+        month[day] = count - 1
+    if not month:
+        store.local_days.pop(month_key, None)
+
+
 def _mtime(path: Path) -> float:
     """A file's modification time, or 0 when it cannot be read. Blocking."""
     try:
@@ -269,7 +305,7 @@ def _prepare_store(root: Path, tz: tzinfo) -> RecordingStore:
                 path = target
             except OSError:
                 pass
-        store.clips[key] = path
+        _index_clip(store, key, path)
     return store
 
 
@@ -330,6 +366,12 @@ def _forget_gone_temp(store: RecordingStore) -> None:
     """
     for key in [key for key, path in store.temp.items() if not path.is_file()]:
         store.temp.pop(key, None)
+
+
+def _forget_gone_durations(store: RecordingStore) -> None:
+    """Forget duration verdicts whose file is gone. Blocking."""
+    for path in [path for path in store.durations if not path.is_file()]:
+        store.durations.pop(path, None)
 
 
 def _saved_temp(root: Path, key: tuple[str, str, str, str]) -> Path | None:
@@ -416,9 +458,31 @@ def _mvhd_seconds(payload: bytes) -> float | None:
     return None
 
 
-def _clip_is_short(path: Path, key: tuple[str, str, str, str]) -> bool:
-    """Whether a saved MP4 is clearly shorter than the interval it stands for."""
+def _clip_seconds(store: RecordingStore, path: Path) -> float | None:
+    """The MP4's ``mvhd`` duration, read once per file. Blocking.
+
+    A saved clip never changes, so the duration is cached against the size and
+    mtime the file had when it was read; a re-downloaded file has both new and
+    is read again. Without the cache a day's list would re-open every saved MP4
+    on every open of the card.
+    """
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    stamp = (stat.st_size, stat.st_mtime_ns)
+    if (cached := store.durations.get(path)) is not None and cached[:2] == stamp:
+        return cached[2]
     seconds = _mp4_seconds(path)
+    store.durations[path] = (stamp[0], stamp[1], seconds)
+    return seconds
+
+
+def _clip_is_short(
+    store: RecordingStore, path: Path, key: tuple[str, str, str, str]
+) -> bool:
+    """Whether a saved MP4 is clearly shorter than the interval it stands for."""
+    seconds = _clip_seconds(store, path)
     if seconds is None:
         return False
     wanted = (parse_stamp(key[2]) - parse_stamp(key[1])).total_seconds()
@@ -483,31 +547,29 @@ async def _save_day_list(
         await storage.async_save(data)
 
 
-async def _load_day_lists(hass: HomeAssistant, store: RecordingStore) -> None:
-    """Restore the finished days' lists into the in-memory cache."""
+async def _persisted_day_list(
+    hass: HomeAssistant, serial: str, day: date
+) -> list[tuple[datetime, datetime]] | None:
+    """A finished day's list from storage, parsed only when it is first opened.
+
+    Loading every persisted day at start-up would hold hundreds of days of
+    intervals in memory whether or not anyone looks at them; a finished day is
+    never read from the camera again, so one is lifted into the cache on demand.
+    """
     data, _ = await _lists_cache(hass)
     lists = data.get("lists")
     if not isinstance(lists, dict):
-        return
-    today = datetime.now(ZoneInfo(hass.config.time_zone)).date()
-    for serial, days in lists.items():
-        if not isinstance(days, dict):
-            continue
-        for text, rows in days.items():
-            try:
-                day = date.fromisoformat(text)
-            except (TypeError, ValueError):
-                continue
-            # A "day" that is today again (the clock moved back) can still grow.
-            if day >= today or not isinstance(rows, list):
-                continue
-            recordings: list[tuple[datetime, datetime]] = []
-            try:
-                for row in rows:
-                    recordings.append((parse_stamp(str(row[0])), parse_stamp(str(row[1]))))
-            except (KeyError, IndexError, RecordingError, TypeError):
-                continue
-            store.days[(serial, day)] = _Day(recordings, 0.0, True, True)
+        return None
+    rows = (lists.get(serial) or {}).get(day.isoformat())
+    if not isinstance(rows, list):
+        return None
+    recordings: list[tuple[datetime, datetime]] = []
+    try:
+        for row in rows:
+            recordings.append((parse_stamp(str(row[0])), parse_stamp(str(row[1]))))
+    except (KeyError, IndexError, RecordingError, TypeError):
+        return None
+    return recordings
 
 
 async def _short_cache(hass: HomeAssistant) -> tuple[dict[str, Any], Store]:
@@ -561,7 +623,6 @@ async def async_get_store(hass: HomeAssistant) -> RecordingStore:
             _prepare_store, media_root(hass), ZoneInfo(hass.config.time_zone)
         )
         await _load_short(hass, store)
-        await _load_day_lists(hass, store)
         hass.data[DATA_RECORDINGS] = store
         return store
 
@@ -621,7 +682,11 @@ async def async_prune_recordings(hass: HomeAssistant) -> int:
     for name in removed:
         key = _key_from_name(name)
         if key is not None:
-            store.clips.pop(key, None)
+            _drop_clip(store, key)
+    # The duration cache holds one entry per file ever read; drop the ones whose
+    # file is gone so a long run does not grow it without a bound.
+    if store.durations:
+        await hass.async_add_executor_job(_forget_gone_durations, store)
     # Clips watched with saving off are only kept for a couple of hours.
     await hass.async_add_executor_job(_sweep_temp, temp_root(hass))
     if store.temp:
@@ -832,6 +897,22 @@ async def async_list_day(
             return cached.recordings, cached.complete
     if day > now.date():
         return [], True
+    # A finished day already read once lives in storage; lift just this day into
+    # the cache on its first open instead of loading every persisted day at
+    # start-up. A day read during its own day is not final and is not persisted,
+    # and a "day" that is today again (the clock moved back) can still grow, so
+    # both are read from the camera instead.
+    if (
+        cached is None
+        and not refresh
+        and day < now.date()
+        and (recordings := await _persisted_day_list(hass, camera.serial, day))
+        is not None
+    ):
+        store.days[key] = _Day(recordings, 0.0, True, True)
+        if recordings:
+            store.seen.add((camera.serial, day))
+        return recordings, True
     # Switching days quickly used to queue one SD session per tap behind the
     # camera lock. Everyone waiting for the same day shares the read that is
     # already on its way.
@@ -888,18 +969,13 @@ async def _read_day(
 # -- the calendar's days -----------------------------------------------------------
 
 
-def _local_days(
-    store: RecordingStore, serial: str, year: int, month: int, tz: ZoneInfo
-) -> set[date]:
-    """Days of a month that already have a saved MP4, in the camera's local time."""
-    days: set[date] = set()
-    for (clip_serial, begin, _end, _fmt) in store.clips:
-        if clip_serial != serial:
-            continue
-        moment = parse_stamp(begin).astimezone(tz)
-        if moment.year == year and moment.month == month:
-            days.add(moment.date())
-    return days
+def _local_days(store: RecordingStore, serial: str, year: int, month: int) -> set[date]:
+    """Days of a month that already have a saved MP4, in the camera's local time.
+
+    A lookup in the index ``_index_clip``/``_drop_clip`` keep, not a scan of
+    every saved clip: opening the calendar must not walk the whole media folder.
+    """
+    return set(store.local_days.get((serial, year, month), {}))
 
 
 def day_has_records(
@@ -1001,7 +1077,7 @@ async def async_month_days(
     store = await async_get_store(hass)
     tz = ZoneInfo(hass.config.time_zone)
     now = datetime.now(tz)
-    local = _local_days(store, camera.serial, year, month, tz)
+    local = _local_days(store, camera.serial, year, month)
     seen = {
         day
         for (clip_serial, day) in store.seen
@@ -1453,9 +1529,9 @@ async def _lookup_clip(
     if (path := store.clips.get(key)) is not None:
         if not await hass.async_add_executor_job(path.is_file):
             # Removed outside the integration (by hand, or by another tool).
-            store.clips.pop(key, None)
+            _drop_clip(store, key)
         elif key in store.short or not await hass.async_add_executor_job(
-            _clip_is_short, path, key
+            _clip_is_short, store, path, key
         ):
             store.clips.move_to_end(key)
             return path
@@ -1464,18 +1540,18 @@ async def _lookup_clip(
             # this file is shorter than the interval, so fetch it again.
             _LOGGER.debug("Clip %s is shorter than its interval; fetching again", path.name)
             await hass.async_add_executor_job(_remove_quietly, path)
-            store.clips.pop(key, None)
+            _drop_clip(store, key)
     # The media folder is the source of truth: a clip saved earlier is served
     # again without touching the camera, even when the in-memory index missed it
     # (a restored backup, a copied file, or an index built before it was written).
     if (path := await hass.async_add_executor_job(_saved_clip, store, key)) is not None:
         if key not in store.short and await hass.async_add_executor_job(
-            _clip_is_short, path, key
+            _clip_is_short, store, path, key
         ):
             _LOGGER.debug("Clip %s is shorter than its interval; fetching again", path.name)
             await hass.async_add_executor_job(_remove_quietly, path)
             return None
-        store.clips[key] = path
+        _index_clip(store, key, path)
         store.clips.move_to_end(key)
         return path
     return None
@@ -1503,7 +1579,7 @@ async def async_clip_states(
                 path = store.clips.get(key)
                 if path is not None and path.is_file():
                     local = True
-                    if key not in store.short and _clip_is_short(path, key):
+                    if key not in store.short and _clip_is_short(store, path, key):
                         incomplete = True
             result.append((local, incomplete))
         return result
@@ -1702,12 +1778,12 @@ async def _async_fetch(
             serial, begin, end, len(ps), fetched - started, fmt, time.monotonic() - fetched,
         )
         if keep:
-            store.clips[key] = target
+            _index_clip(store, key, target)
             store.clips.move_to_end(key)
             # The camera sometimes sends a little less than the index promised. One
             # real attempt was enough: keep what came back instead of fetching it on
             # every play.
-            if await hass.async_add_executor_job(_clip_is_short, target, key):
+            if await hass.async_add_executor_job(_clip_is_short, store, target, key):
                 store.short.add(key)
                 await _save_short(hass, store)
                 _LOGGER.debug(

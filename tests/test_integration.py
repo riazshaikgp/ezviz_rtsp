@@ -166,6 +166,31 @@ async def test_battery_camera_sets_up_and_offers_a_cloud_stream(hass) -> None:
     assert hass.services.has_service(DOMAIN, "set_alarm_detection_sensibility")
 
 
+async def test_card_registration_retries_after_a_failure(hass) -> None:
+    """A failure while shipping the card must not block a later retry."""
+    from custom_components.ezviz_rtsp import _async_register_card
+
+    await _setup(hass)
+    # Pretend the card still has to be registered (as after a failed attempt).
+    hass.data.pop(DATA_CARD)
+
+    with (
+        patch(
+            "custom_components.ezviz_rtsp.async_get_integration",
+            side_effect=RuntimeError("boom"),
+        ),
+        pytest.raises(RuntimeError),
+    ):
+        await _async_register_card(hass)
+
+    assert hass.data.get(DATA_CARD) is not True
+
+    # The static paths were added before the failure, so the retry must not add
+    # them again (aiohttp refuses a route registered twice) - it still finishes.
+    await _async_register_card(hass)
+    assert hass.data[DATA_CARD] is True
+
+
 async def test_an_entity_goes_unavailable_when_its_camera_leaves(hass) -> None:
     """A camera that leaves the account must not raise on every poll.
 

@@ -967,6 +967,26 @@ def test_mp4_duration_is_read_from_the_movie_header(tmp_path) -> None:
     assert rec_module._mp4_seconds(tmp_path / "bad.mp4") is None
 
 
+def test_the_mvhd_duration_is_read_once_per_file(monkeypatch, tmp_path) -> None:
+    """A saved clip's duration must not be re-read on every open of a day."""
+    store = rec_module.RecordingStore(tmp_path, TZ)
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(_mp4_bytes(12))
+    read = MagicMock(wraps=rec_module._mp4_seconds)
+    monkeypatch.setattr(rec_module, "_mp4_seconds", read)
+
+    assert rec_module._clip_seconds(store, clip) == 12.0
+    assert rec_module._clip_seconds(store, clip) == 12.0
+    assert read.call_count == 1, "the file is read once, then answered from the cache"
+
+    # A re-downloaded file (a new mtime) is read again.
+    clip.write_bytes(_mp4_bytes(8))
+    stat = clip.stat()
+    os.utime(clip, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    assert rec_module._clip_seconds(store, clip) == 8.0
+    assert read.call_count == 2
+
+
 async def test_a_short_clip_is_not_fetched_again_after_a_restart(
     hass, _cloud, hass_storage
 ) -> None:
@@ -1342,6 +1362,32 @@ async def test_a_finished_past_day_survives_a_restart(
     assert len(index.calls) == 1, "the finished day is not read from the camera again"
 
 
+async def test_a_persisted_day_is_parsed_only_when_it_is_opened(
+    hass, _cloud, hass_storage
+) -> None:
+    """A restart must not parse every stored day up front."""
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    tz = ZoneInfo("Africa/Johannesburg")
+    yesterday = datetime.now(tz).date() - timedelta(days=1)
+    start = datetime.combine(yesterday, datetime.min.time()) + timedelta(hours=8)
+    _entry, index = await _setup_with_index(hass, [start])
+    camera = rec_module.find_camera(hass, "BK1")
+    await rec_module.async_list_day(hass, camera, yesterday)
+
+    # A restart rebuilds the store, but the stored day is left unparsed.
+    hass.data.pop(rec_module.DATA_RECORDINGS)
+    hass.data.pop(rec_module.DATA_LISTS)
+    hass.data.pop(rec_module.DATA_LISTS_STORE)
+    store = await rec_module.async_get_store(hass)
+    assert ("BK1", yesterday) not in store.days
+
+    # Opening it lifts just that day into the cache, without the camera.
+    listed, complete = await rec_module.async_list_day(hass, camera, yesterday)
+    assert complete and len(listed) == 1
+    assert ("BK1", yesterday) in store.days
+    assert len(index.calls) == 1
+
+
 async def test_an_empty_finished_day_is_not_read_again(
     hass, _cloud, hass_storage
 ) -> None:
@@ -1415,7 +1461,7 @@ async def test_month_days_lists_the_days_with_saved_clips(hass, _cloud) -> None:
     saved = rec_module._clip_path(store, key)
     saved.parent.mkdir(parents=True)
     saved.write_bytes(b"mp4")
-    store.clips[key] = saved
+    rec_module._index_clip(store, key, saved)
 
     result = await rec_module.async_month_days(hass, camera, 2026, 10, scan=False)
 
