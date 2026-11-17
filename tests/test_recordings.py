@@ -1470,6 +1470,28 @@ async def test_month_days_lists_the_days_with_saved_clips(hass, _cloud) -> None:
     assert result["scanned"] is None
 
 
+async def test_two_cameras_keep_their_recordings_apart(hass, _cloud) -> None:
+    """A second camera's clips must not show on the first camera's calendar."""
+    await hass.config.async_set_time_zone("Africa/Johannesburg")
+    await _setup_with_index(hass, [])
+    store = await rec_module.async_get_store(hass)
+    door = ("BK1", "20261003T080000Z", "20261003T080008Z", "h264")
+    yard = ("BK2", "20261005T080000Z", "20261005T080008Z", "h264")
+    for key in (door, yard):
+        path = rec_module._clip_path(store, key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(_mp4_bytes(8))
+        rec_module._index_clip(store, key, path)
+
+    assert rec_module._local_days(store, "BK1", 2026, 10) == {date(2026, 10, 3)}
+    assert rec_module._local_days(store, "BK2", 2026, 10) == {date(2026, 10, 5)}
+
+    # Removing one camera's clip leaves the other camera's day alone.
+    rec_module._drop_clip(store, door)
+    assert rec_module._local_days(store, "BK1", 2026, 10) == set()
+    assert rec_module._local_days(store, "BK2", 2026, 10) == {date(2026, 10, 5)}
+
+
 async def test_month_scan_marks_days_and_persists(
     hass, _cloud, hass_storage
 ) -> None:
