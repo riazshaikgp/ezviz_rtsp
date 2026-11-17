@@ -1931,10 +1931,8 @@ class EzvizVideoCard extends HTMLElement {
         // The camera's index can be a second or two off the file it sends;
         // once the player knows the real length, show that in the row.
         if (this._selected !== rec) return;
-        // The picture's shape can change the card's height: keep the reader's
-        // place even if the page was scrolled to its bottom.
+        // _fitMediaTo follows its own height change with the scroll.
         this._fitMediaTo(video);
-        keepPlace();
         const seconds = Math.round(video.duration);
         if (!Number.isFinite(seconds) || seconds <= 0) return;
         const listed = rec.seconds;
@@ -2076,9 +2074,9 @@ class EzvizVideoCard extends HTMLElement {
     this._queuedClip = null;
   }
 
-  // Where the reader is: the scrolling ancestor's position, or the page's.
-  // Returns a function that puts it back if a browser moved it.
-  _keepPagePlace() {
+  // The thing that actually scrolls: the card's nearest scrollable ancestor,
+  // or null when the page itself does (Home Assistant scrolls the window).
+  _pageScroller() {
     let scroller = this.parentElement;
     while (
       scroller &&
@@ -2090,22 +2088,50 @@ class EzvizVideoCard extends HTMLElement {
         /(auto|scroll)/.test(style.overflowY) &&
         scroller.scrollHeight > scroller.clientHeight + 1
       ) {
-        break;
+        return scroller;
       }
       scroller = scroller.parentElement;
     }
-    if (!scroller || scroller === document.body || scroller === document.documentElement) {
-      scroller = null; // the page itself scrolls
+    return null;
+  }
+
+  // Move the reader's view by ``delta`` pixels.
+  _scrollBy(delta) {
+    if (!delta) return;
+    try {
+      const scroller = this._pageScroller();
+      if (scroller) scroller.scrollTop += delta;
+      else window.scrollTo(window.scrollX, window.scrollY + delta);
+      // A deliberate move is the new "where the reader is", so a keeper still
+      // waiting (the video's first playing event) does not undo it.
+      if (this._place && this._place.scroller === scroller) {
+        this._place.top += delta;
+      }
+    } catch {
+      /* an embedded browser without scrollTo */
     }
-    const top = scroller ? scroller.scrollTop : window.scrollY;
-    const left = scroller ? scroller.scrollLeft : window.scrollX;
+  }
+
+  _keepPagePlace() {
+    const scroller = this._pageScroller();
+    const place = {
+      scroller,
+      top: scroller ? scroller.scrollTop : window.scrollY,
+      left: scroller ? scroller.scrollLeft : window.scrollX,
+    };
+    this._place = place;
     return () => {
+      // Not cleared here: _scrollBy may still bump ``place.top`` (the media box
+      // growing to the camera's shape) and the next call (the video's playing
+      // event) must land on the moved position, not the original one.
       try {
         if (!scroller) {
-          if (Math.abs(window.scrollY - top) > 1) window.scrollTo(left, top);
-        } else if (Math.abs(scroller.scrollTop - top) > 1) {
-          scroller.scrollTop = top;
-          scroller.scrollLeft = left;
+          if (Math.abs(window.scrollY - place.top) > 1) {
+            window.scrollTo(place.left, place.top);
+          }
+        } else if (Math.abs(scroller.scrollTop - place.top) > 1) {
+          scroller.scrollTop = place.top;
+          scroller.scrollLeft = place.left;
         }
       } catch {
         /* an embedded browser without scrollTo */
@@ -2122,6 +2148,13 @@ class EzvizVideoCard extends HTMLElement {
     const width = Number(element.videoWidth || element.naturalWidth);
     const height = Number(element.videoHeight || element.naturalHeight);
     if (!width || !height) return;
+    const box = media.getBoundingClientRect();
+    // When the picture is above what the reader is looking at, growing it would
+    // push the list down under them (the first clip after a page load changes
+    // the box from 16:9 to the camera's own shape). Follow the change with the
+    // scroll, so the list stays exactly where it was.
+    const above = box.top < 0;
+    const before = box.height;
     if (width >= height) {
       media.style.aspectRatio = `${width} / ${height}`;
       element.style.objectFit = "contain";
@@ -2131,6 +2164,8 @@ class EzvizVideoCard extends HTMLElement {
       media.style.aspectRatio = "1 / 1";
       element.style.objectFit = "cover";
     }
+    const grown = media.getBoundingClientRect().height - before;
+    if (above && Math.abs(grown) > 1) this._scrollBy(grown);
   }
 
   // Repaint the picture area for the clip's current state. Rebuilding the card

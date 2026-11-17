@@ -67,6 +67,13 @@ This project follows [Semantic Versioning](https://semver.org/).
   the month was last checked and whether the check was complete.
 
 ### Fixed
+- **The picture no longer nudges the list when the first clip of a session
+  starts.** A recording's box changes from the card's 16:9 to the camera's own
+  shape the moment the player learns it, and when that happens near the bottom
+  of a freshly loaded page the grown box pushes the list down under the reader
+  (the window's scroll is already at its end). The card now follows that change
+  with the scroll while the box is above the viewport, so the list stays exactly
+  where it was; later clips, whose shape is already known, do not move it at all.
 - **Opening a recording no longer scrolls the page (or the list).** Clicking a
   row rebuilt the whole card. That put the picture box back from the clip's own
   shape to the fixed 16:9, so the card got shorter — and a page scrolled to its
