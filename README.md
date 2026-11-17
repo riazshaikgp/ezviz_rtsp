@@ -666,7 +666,10 @@ The bundled copy is the upstream package **unchanged**, except that its internal
 imports point at the bundled location. Its own runtime dependencies
 (`paho-mqtt`, `pycryptodome`, `tzdata`, `xmltodict`) are listed in the manifest
 and installed normally; `requests` and `cryptography` come with Home Assistant.
-To update the library, replace that folder with a newer release.
+
+To update the library, run **`scripts/vendor_pyezvizapi.sh <version>`**: it
+fetches that release from PyPI, drops it in, and rewrites its import root (pass
+a path to an already-unpacked folder instead of a version to copy that).
 
 ---
 
