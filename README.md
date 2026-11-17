@@ -567,10 +567,14 @@ recording is also readable from the **Media** browser under `ezviz_rtsp`.
   kept in storage and reused; today's for a minute (or until ⟳).
 - **How long they stay.** Under **Configure → Downloaded recordings** you choose
   how many days those MP4s are kept (default **7**); older files are deleted,
-  the rest left alone. `0` keeps them until you delete them yourself. The folder
-  is swept at start-up, once a day while Home Assistant runs, and whenever a new
-  clip is downloaded; day folders left empty are removed. Clips saved flat by an
-  older version are moved into their day folders on the next start.
+  the rest left alone. `0` keeps them until you delete them yourself. **The
+  setting is per account:** each EZVIZ account has its own value, and a clip is
+  swept by the setting of the account its camera belongs to, so two accounts can
+  keep their recordings for different lengths. The folder is swept at start-up,
+  once a day while Home Assistant runs, and whenever a new clip is downloaded;
+  day folders left empty are removed. Clips saved flat by an older version are
+  moved into their day folders on the next start. A clip whose camera is no
+  longer in any loaded account is left alone (its retention is unknown).
 - **Format.** The camera records **H.265/HEVC**. Safari (and the iOS/macOS
   Home Assistant apps) and most Chrome and Edge builds on Windows and macOS play
   it as is; the integration only repackages it as MP4. Firefox and browsers

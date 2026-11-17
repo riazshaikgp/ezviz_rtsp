@@ -272,6 +272,12 @@ This project follows [Semantic Versioning](https://semver.org/).
   cut-off download.
 
 ### Changed
+- **Downloaded recordings are kept per account.** The retention setting under
+  **Configure → Downloaded recordings** now applies to the cameras of the
+  account it is set on, not to the whole media folder, so two EZVIZ accounts can
+  keep their recordings for different lengths: a clip is swept by the setting of
+  the account its camera belongs to. A clip whose camera is no longer in a
+  set-up account is left alone, because its retention is unknown.
 - **Opening a day or the calendar does far less work.** A saved MP4's duration
   (read from its `mvhd` box, to spot a copy the camera cut short) is now read
   once and remembered against the file's size and mtime; the calendar's green

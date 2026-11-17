@@ -249,9 +249,9 @@
           "recordings_keep_days": "Keep downloaded recordings for (days)"
         },
         "data_description": {
-          "recordings_keep_days": "A recording the card plays is saved as an MP4 under Home Assistant's media folder (media/ezviz_rtsp). Files older than this many days are deleted; 0 keeps them until you remove them yourself."
+          "recordings_keep_days": "A recording the card plays is saved as an MP4 under Home Assistant's media folder (media/ezviz_rtsp). The clips of this account's cameras older than this many days are deleted; 0 keeps them until you remove them yourself. Each account has its own setting."
         },
-        "description": "Recordings you play in the card are downloaded once and kept under Home Assistant's media folder, so seeking and playing them again do not wake the camera. This is how long those files stay.",
+        "description": "Recordings you play in the card are downloaded once and kept under Home Assistant's media folder, so seeking and playing them again do not wake the camera. This is how long this account's clips stay.",
         "title": "Downloaded recordings"
       },
       "video": {

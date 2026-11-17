@@ -1664,6 +1664,68 @@ async def test_downloaded_clips_are_pruned_by_retention(hass, _cloud) -> None:
     assert stale.exists()
 
 
+def test_each_account_sets_its_own_retention() -> None:
+    """Retention comes from the account a camera belongs to, not the first one."""
+    from homeassistant.const import CONF_TYPE
+
+    from custom_components.ezviz_rtsp.const import (
+        ATTR_TYPE_CLOUD,
+        CONF_RECORDINGS_KEEP_DAYS,
+    )
+
+    def entry(keep, serials, kind=ATTR_TYPE_CLOUD):
+        options = {} if keep is None else {CONF_RECORDINGS_KEEP_DAYS: keep}
+        return SimpleNamespace(
+            data={CONF_TYPE: kind},
+            options=options,
+            runtime_data=SimpleNamespace(data={s: {} for s in serials}),
+        )
+
+    hass = SimpleNamespace(
+        config_entries=SimpleNamespace(
+            # The sweep runs during setup, when no entry is LOADED yet, so it
+            # must read every entry (with a coordinator), not the loaded ones.
+            async_loaded_entries=lambda _domain: [],
+            async_entries=lambda _domain: [
+                entry(30, ["BK1"]),
+                entry(7, ["BK2", "BK3"]),
+                entry(None, ["BK4"]),  # no option set: the default applies
+                entry(1, ["BK5"], kind="CAMERA_ACCOUNT"),  # not a cloud account
+                entry(1, []),  # a cloud account that is not set up: no cameras
+            ],
+        )
+    )
+
+    assert rec_module._retention_by_serial(hass) == {
+        "BK1": 30,
+        "BK2": 7,
+        "BK3": 7,
+        "BK4": rec_module.DEFAULT_RECORDINGS_KEEP_DAYS,
+    }
+
+
+def test_prune_follows_each_cameras_retention(tmp_path) -> None:
+    """A clip is kept or swept by its own camera's account window."""
+    root = tmp_path / "media"
+    folder = root / "2026/11/01"
+    folder.mkdir(parents=True)
+    old = time.time() - 10 * 86400
+    clips = {
+        name: folder / rec_module._clip_name(("BK" + name, "20261101T080000Z", "20261101T080008Z", "h264"))
+        for name in ("1", "2", "9")
+    }
+    for path in clips.values():
+        path.write_bytes(b"mp4")
+        os.utime(path, (old, old))
+
+    removed = rec_module._prune(root, {"BK1": 30, "BK2": 7, "BK3": 0})
+
+    assert removed == [clips["2"].name]
+    assert clips["1"].exists(), "30 days: a ten-day-old clip stays"
+    assert not clips["2"].exists(), "7 days: swept"
+    assert clips["9"].exists(), "a camera in no loaded account is left alone"
+
+
 async def test_a_downloaded_clip_is_filed_under_its_local_day(hass, _cloud) -> None:
     await hass.config.async_set_time_zone("Africa/Johannesburg")
     await _setup_with_index(hass, [])

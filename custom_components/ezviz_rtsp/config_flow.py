@@ -786,11 +786,12 @@ class EzvizOptionsFlowHandler(OptionsFlowWithReload):
     async def async_step_recordings(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """How long downloaded recordings are kept under Home Assistant's media folder.
+        """How long this account's downloaded recordings are kept under media.
 
         A recording the card plays is saved as an MP4 in ``media/ezviz_rtsp``; this
-        is how many days those files stay before they are swept. ``0`` keeps them
-        until they are removed by hand.
+        is how many days the clips of **this account's** cameras stay before they
+        are swept (each account has its own setting). ``0`` keeps them until they
+        are removed by hand.
         """
         options = self.config_entry.options
         if user_input is not None:

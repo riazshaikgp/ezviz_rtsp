@@ -627,30 +627,57 @@ async def async_get_store(hass: HomeAssistant) -> RecordingStore:
         return store
 
 
-def _keep_days(hass: HomeAssistant) -> int:
-    """How many days downloaded clips are kept; 0 keeps them forever."""
+def _keep_days(entry: EzvizConfigEntry) -> int:
+    """How long one account's downloaded clips are kept; 0 keeps them forever."""
+    try:
+        return int(
+            entry.options.get(CONF_RECORDINGS_KEEP_DAYS, DEFAULT_RECORDINGS_KEEP_DAYS)
+        )
+    except (TypeError, ValueError):
+        return DEFAULT_RECORDINGS_KEEP_DAYS
+
+
+def _retention_by_serial(hass: HomeAssistant) -> dict[str, int]:
+    """Each loaded camera's retention, from the account that owns it.
+
+    A camera belongs to exactly one account, and every account sets its own
+    "keep downloaded recordings for" option, so a clip is pruned by the setting
+    of the account its camera is in. A camera of an account that is not loaded
+    is left out: its clips are never pruned on a guess.
+    """
+    keep: dict[str, int] = {}
+    # ``async_entries`` and not ``async_loaded_entries``: the sweep runs while the
+    # account is still being set up (the entry is not LOADED yet then), and its
+    # own clips must be swept too. An entry without a coordinator is one that is
+    # not set up (or failed to), so its cameras are unknown this round.
     for entry in hass.config_entries.async_entries(DOMAIN):
-        if entry.data.get(CONF_TYPE) == ATTR_TYPE_CLOUD:
-            try:
-                return int(
-                    entry.options.get(
-                        CONF_RECORDINGS_KEEP_DAYS, DEFAULT_RECORDINGS_KEEP_DAYS
-                    )
-                )
-            except (TypeError, ValueError):
-                break
-    return DEFAULT_RECORDINGS_KEEP_DAYS
+        if entry.data.get(CONF_TYPE) != ATTR_TYPE_CLOUD:
+            continue
+        coordinator = getattr(entry, "runtime_data", None)
+        data = getattr(coordinator, "data", None)
+        if not data:
+            continue
+        days = _keep_days(entry)
+        for serial in data:
+            keep.setdefault(serial, days)
+    return keep
 
 
-def _prune(root: Path, keep_days: int) -> list[str]:
-    """Delete the MP4s downloaded more than ``keep_days`` ago. Blocking."""
-    if keep_days <= 0:
-        return []
-    cutoff = time.time() - keep_days * 86400
+def _prune(root: Path, keep_by_serial: dict[str, int]) -> list[str]:
+    """Delete the MP4s past their camera's account retention. Blocking.
+
+    A clip whose camera is not in any loaded account is left alone: its
+    retention is unknown, and a guess could delete clips the user wants.
+    """
+    now = time.time()
     removed: list[str] = []
     for path in root.rglob("*.mp4"):
+        key = _key_from_name(path.name)
+        days = keep_by_serial.get(key[0]) if key is not None else None
+        if days is None or days <= 0:
+            continue
         try:
-            if path.stat().st_mtime < cutoff:
+            if path.stat().st_mtime < now - days * 86400:
                 path.unlink()
                 removed.append(path.name)
                 # Leave no empty year/month/day folders behind.
@@ -678,7 +705,8 @@ def _ensure_parent(path: Path) -> None:
 async def async_prune_recordings(hass: HomeAssistant) -> int:
     """Drop the downloaded clips past their retention; returns how many went."""
     store = await async_get_store(hass)
-    removed = await hass.async_add_executor_job(_prune, store.root, _keep_days(hass))
+    keep_by_serial = _retention_by_serial(hass)
+    removed = await hass.async_add_executor_job(_prune, store.root, keep_by_serial)
     for name in removed:
         key = _key_from_name(name)
         if key is not None:
