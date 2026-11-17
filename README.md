@@ -29,20 +29,12 @@ looking at it. When a still is enough, it can also have the camera take a
 fresh picture on demand, or whenever a dashboard shows it (see
 [Fresh pictures on demand](#fresh-pictures-on-demand)).
 With an SD card in the camera, it can also list and play back the camera's
-recordings, from the card itself or from a card of their own (see
-[Recordings on the SD card](#recordings-on-the-sd-card)).
+recordings (see [Recordings on the SD card](#recordings-on-the-sd-card)).
 
 It is a fork of the **built-in** EZVIZ integration, so everything that one
-does still works here. It lives under its own domain, `ezviz_rtsp`, which means
-it sits **next to** the built-in one instead of replacing it.
-
-> **A bundled library.** This integration and the built-in EZVIZ one are
-> separate integrations. Unlike the built-in one, this one needs a 2.x
-> `pyezvizapi` (for SD-card playback), so it **ships its own copy** of
-> `pyezvizapi` 2.5.1 inside the integration and does not ask Home Assistant to
-> install the package. That means it can run **next to** the built-in EZVIZ
-> integration, or any other integration that uses `pyezvizapi`, without a version
-> conflict. See [The bundled pyezvizapi](#the-bundled-pyezvizapi).
+does still works here. It lives under its own domain, `ezviz_rtsp`, so it sits
+**next to** the built-in one instead of replacing it — you can keep both
+installed, and no extra setup is needed for them to coexist.
 
 ---
 
@@ -107,9 +99,7 @@ after **Mushroom cards** — a rounded card, an icon tile, a status line and
 small **play/stop chips in the bottom-right corner** of the picture, plus a
 **snapshot chip** in the bottom-left that wakes the camera for a fresh picture —
 but it needs neither Mushroom nor any other frontend add-on. The card finds a
-camera by its serial (or `entity`) and plays the integration's **own fast
-picture stream**, falling back to Home Assistant's stream only for a camera the
-integration does not stream itself.
+camera by its serial (or `entity`).
 
 A **filmstrip button next to the battery level** opens the camera's SD-card
 recordings in the same card; see [Recordings on the SD card](#recordings-on-the-sd-card).
@@ -184,39 +174,20 @@ A **battery camera's charge** is shown in the top-right corner, opposite the
 camera name, when the integration exposes it; `show_battery: false` hides it.
 Directly to its left is the **filmstrip button**, which switches the card to the
 camera's SD-card recordings (see
-[Recordings in the video card](#recordings-in-the-video-card)); `hide_recordings:
+[Recordings on the SD card](#recordings-on-the-sd-card)); `hide_recordings:
 true` removes it.
 
-The card shows the picture through the integration's **own fast picture stream**
-(a live MJPEG) so it appears a few seconds after the camera wakes, rather than
-waiting for Home Assistant's HLS to build segments. It falls back to HLS for a
-camera the integration does not stream itself. While the camera wakes, the card
-keeps its **last picture** on screen, so it never looks blank. The picture is
-served from an **authenticated** view and the card reads it through a short-lived
-**signed URL**, so a link that leaks (or a user you later remove) cannot keep
-watching. **hls.js is bundled with the integration** and served from its own
-path — the card loads no code from a public CDN.
+While the camera wakes, the card keeps its **last picture** on screen, so it
+never looks blank. It waits up to 45 seconds for the first frame (a battery
+camera over the cloud relay is not instant); `max_seconds` only starts counting
+once the picture is on screen.
 
-The card waits up to 45 seconds for the camera to wake and send its first frame
-(a battery camera over the cloud relay is not instant); `max_seconds` only starts
-counting once the picture is on screen.
-
-**A battery camera can never be left streaming forever.** Any one of these ends
-it:
-
-1. The **card** stops the stream when `max_seconds` runs out, and releases the
-   reader.
-2. The **integration** closes the cloud session shortly after the last reader
-   leaves — **10 seconds** by default (changeable under **Configure → Release the
-   camera after**; `0` = at once).
-3. Even if a client misbehaves entirely, a battery camera is cut off after
-   **5 minutes** of one continuous stream (changeable under **Configure →
-   Maximum stream duration**); powered cameras are not capped.
-
-Every open and close is written to the Home Assistant log
-(`Live view of <serial> is streaming` / `… stopped` / `… hit its N s battery
-limit`), so you can confirm in the log that the camera actually went back to
-sleep.
+**A battery camera is never left streaming forever.** The card stops the stream
+when `max_seconds` runs out; the integration releases the cloud session shortly
+after the last viewer leaves (10 seconds by default); and even if a client
+misbehaves entirely, a battery camera is cut off after 5 minutes of one
+continuous stream. Both limits are configurable (see
+[The settings worth knowing](#the-settings-worth-knowing)).
 
 The **visual editor** lists your cameras and groups the options into **Camera**,
 **Playback**, **Picture and snapshots**, **Buttons and battery** and
@@ -249,6 +220,10 @@ Everything below lives under **Configure** on the integration:
   `0` takes one on every view), however many dashboards ask. Buttons, the card's
   snapshot chip and scripts that call `capture_picture` are not affected. See
   [Fresh pictures on demand](#fresh-pictures-on-demand).
+- **Downloaded recordings** — how many days the recordings you have watched are
+  kept, in days (default **7**; `0` keeps them until you delete them). The
+  setting is per EZVIZ account. See
+  [Recordings on the SD card](#recordings-on-the-sd-card).
 - **General** — request timeout and the ffmpeg arguments for cameras you added
   over local RTSP.
 - **Stream address for other apps** — see below.
@@ -277,9 +252,8 @@ snapshot** button in its **Controls** section, so you can take a picture with
 one press without writing a service call. Each call wakes the camera, so use it
 on demand rather than on a timer. The snapshot is kept in memory, so it is
 empty again after a restart until the next capture. A sleeping camera often
-answers the first request with EZVIZ error 2009 ("device network exception")
-while it wakes; the service then tries once more after 5 seconds, so such a
-call can take a few seconds longer.
+answers the first request late while it wakes, so such a call can take a few
+seconds longer.
 
 | Service data | Default | What it does |
 |---|---|---|
@@ -389,12 +363,11 @@ day of a camera's recordings and plays the one you tap, right in the card.
   recording plays it in the same media area, with the usual video controls and a
   **✕** in the corner to go back to the picture. The recording **stays** in the
   card until you pick another, close it or leave the mode.
-- **Live video stops** as soon as the mode opens. The camera cannot stream and
-  read its SD card at the same time, so this is what keeps playback from failing;
-  going back to the live view starts the stream again when `auto_play` is on.
-  The integration is asked to **release the cloud session at once** rather than
-  after the configured *Release the camera after* delay, so the first tap works
-  immediately — the card does not wait the 10 seconds a normal stop would.
+- **Live video stops** as soon as the mode opens, and the camera is released at
+  once rather than after the configured *Release the camera after* delay, so the
+  first tap works immediately. The camera cannot stream and read its SD card at
+  the same time, so this is what keeps playback from failing; going back to the
+  live view starts the stream again when `auto_play` is on.
 - The calendar, hour grouping and the ✕ player are the card's own; the
   recording format follows the browser (HEVC when it plays it, H.264
   otherwise), and a failed HEVC clip is retried in H.264. The `format` and
@@ -414,86 +387,52 @@ day of a camera's recordings and plays the one you tap, right in the card.
 - **Tap a recording to play it** in the card's player, with the usual video
   controls (pause, seek, full screen). Tap another to switch, or close the
   player with ✕. When it arrives the player replaces the progress bar in place:
-  the list, the page and the row you clicked stay where they were (picking a
-  row does not rebuild the card either, so the list does not jump back to its
-  top). The picture
+  the list, the page and the row you clicked stay where they were. The picture
   box takes the recording's own shape (a 4:3 doorbell clip fills the card's
   width instead of showing black bands at the sides), and the live picture does
-  the same. The shape is measured from the camera's own idle picture as soon as
-  the card appears — no extra request, the poster is the same frame — so the box
-  is already the right height when the first clip starts and nothing shifts, on
-  any screen size. While the clip is on its way the card shows a **progress bar**
-  with the seconds received out of the recording's length, followed by
-  "Converting the recording…"; the list stays at the row you tapped instead of
-  jumping back to the top. The bar follows the video timestamps the camera
-  sends, so it is real progress rather than a guess, and it reuses one report
-  when several cards wait for the same clip.
+  the same. While the clip is on its way the card shows a **progress bar** with
+  the seconds received out of the recording's length, followed by "Converting
+  the recording…".
 - **Tapping several recordings in a row** while one is still being fetched only
   remembers the newest: the ones in between are not downloaded, so the camera is
   not woken for clips you skipped. The waiting view says "Waiting for the
-  current recording to finish…". Tapping the recording that is being fetched
-  again brings **its progress bar** back, and it plays as soon as it lands. A
-  recording already saved in the media folder still plays at once, without
-  waiting for that download to finish.
+  current recording to finish…". A recording already saved in the media folder
+  still plays at once, without waiting for that download to finish.
 - **A recording already saved in the media folder is never fetched again** —
   unless its file is clearly shorter than the interval in its name, which means
   the download was cut off; then the card fetches it once more. It otherwise
-  plays straight from `media/ezviz_rtsp/`, without waking the camera — the media
-  folder is checked even when the in-memory index missed a file (a restored
-  backup, a copy made by hand). An **H.264** copy also answers a request for
-  HEVC, since H.264 plays in every browser; the other way round is not done,
-  because HEVC does not.
+  plays straight from `media/ezviz_rtsp/`, without waking the camera. An
+  **H.264** copy also answers a request for HEVC, since H.264 plays in every
+  browser.
 - **The calendar marks the days that have a recording.** A **green dot** means
   clips from that day are already saved in the media folder — those days are
   known without touching the camera and survive every restart. Days with
   recordings only on the camera's SD card get a **blue dot**. Opening such a day
-  marks it, and the mark is saved in Home Assistant's `.storage`
-  (`ezviz_rtsp.sd_days`), so its dot is back after a restart too. To see a whole
-  month's dots without opening each day, press **Check the SD card for this
-  month** in the picker and it searches each day of that month once, showing
-  progress and how long the result is kept; that answer is stored as well, so
-  after a restart those dots are back without waking the camera. A scan that
-  runs out of time keeps the days it found and can be run again. The camera is
-  never asked about a month just by opening the picker.
+  marks it, and the mark survives a restart too. To see a whole month's dots
+  without opening each day, press **Check the SD card for this month** in the
+  picker; it searches each day of that month once, shows progress, and remembers
+  the result across restarts. A scan that runs out of time keeps the days it
+  found and can be run again. The camera is never asked about a month just by
+  opening the picker.
 - At the right of each row, a small icon says where the clip is: a **cloud** for
   one that still has to be fetched from the camera, a green **check** for one
   already saved under `media/ezviz_rtsp/` (in either format), and an orange
   **alert cloud** for a saved copy that is shorter than its interval and will be
-  replaced on the next play. It turns into a check as soon as you play the clip.
-  When an incomplete copy is being replaced, the card says **"The saved
-  recording is incomplete — downloading it again…"** instead of the usual
-  fetching message.
-- **Live waits for a download that is still running.** The camera cannot
-  stream and read its SD card at once, so pressing live (or opening a card with
-  auto-play) while a recording is coming off the card first says **"Waiting for
-  the download to finish…"** and only then **"Waking the camera…"**. The
-  download is not cancelled: it completes and is saved, and the stream starts
-  as soon as the camera is free. The integration holds the live start on the
-  same per-camera lock the downloads use, so this also works when another card
-  or the download service started the clip, and it never leaves a second EZVIZ
-  session open in the meantime.
+  replaced on the next play.
+- **Live waits for a download that is still running.** Pressing live (or opening
+  a card with auto-play) while a recording is coming off the card first says
+  **"Waiting for the download to finish…"** and only then **"Waking the
+  camera…"**. The download is not cancelled: it completes and is saved, and the
+  stream starts as soon as the camera is free.
 - **Watching a clip saves it by default.** Turn **Save watched recordings**
   (`save_recordings: false`) off in the card's settings to keep the media folder
   clean: a watched recording is then fetched into a temporary folder, plays the
   same, is deleted after about two hours and never appears under **Media**. It
-  does not get a green check, and the retention setting does not apply to it. A
-  clip already saved earlier still plays from its permanent copy.
-- **Opening the view never forces a read; only ⟳ does.** The integration owns
-  the cache: today's list is reused while it is under a minute old (a page
-  reload included), and read from the camera only once that minute is over. A
-  finished past day is stored in Home Assistant's `.storage`
-  (`ezviz_rtsp.day_lists`) the first time it is read after it ended, so it is
-  never read again — even after a restart — and an empty day is kept too. A day
-  read only while it was still running is read once more after midnight, since
-  its list could still have grown. Switching days quickly shares the read
-  already on its way (also across cards) instead of queueing a camera session
-  per tap, and a failed read is not cached, so the next attempt may reach the
-  camera again. The calendar's month dots come from the cache and the media
-  folder until you press **Check the SD card for this month**, which is the
-  only part that asks the camera. A read that was on its way when the view was
-  closed is kept when it arrives. A card that leaves the screen pauses its
-  player. A background check that returns the same list only updates the day
-  label, so the card never flashes or jumps while a clip is downloading.
+  does not get a green check, and the retention setting does not apply to it.
+- **Opening the view does not force a read from the camera; only ⟳ does.**
+  Today's list is reused while it is under a minute old, and a finished past day
+  is remembered so it is never read again — even after a restart. Switching days
+  quickly shares one read instead of queueing a camera session per tap.
 
 ### Getting the latest recording on demand
 
@@ -563,8 +502,7 @@ recording is also readable from the **Media** browser under `ezviz_rtsp`.
   `media/ezviz_rtsp/<year>/<month>/<day>/`, using Home Assistant's local time.
   Seeking and playing it again don't touch the camera, and the files survive a
   restart. Browse and download them from **Media → My media → ezviz_rtsp**,
-  where the years, months and days are the folders. A finished day's list is
-  kept in storage and reused; today's for a minute (or until ⟳).
+  where the years, months and days are the folders.
 - **How long they stay.** Under **Configure → Downloaded recordings** you choose
   how many days those MP4s are kept (default **7**); older files are deleted,
   the rest left alone. `0` keeps them until you delete them yourself. **The
@@ -573,50 +511,23 @@ recording is also readable from the **Media** browser under `ezviz_rtsp`.
   keep their recordings for different lengths. The folder is swept at start-up,
   once a day while Home Assistant runs, and whenever a new clip is downloaded;
   day folders left empty are removed. Clips saved flat by an older version are
-  moved into their day folders on the next start. A clip whose camera is no
-  longer in any loaded account is left alone (its retention is unknown).
+  moved into their day folders on the next start.
 - **Format.** The camera records **H.265/HEVC**. Safari (and the iOS/macOS
   Home Assistant apps) and most Chrome and Edge builds on Windows and macOS play
-  it as is; the integration only repackages it as MP4. Firefox and browsers
-  without HEVC get an **H.264** copy that Home Assistant converts with ffmpeg —
-  a few seconds of CPU per clip on a Raspberry Pi 5.
+  it as is; Firefox and browsers without HEVC get an **H.264** copy that Home
+  Assistant converts with ffmpeg.
 - **One viewer at a time.** EZVIZ serves one cloud session per camera. Stop
   the camera's live view before playing a recording (the card says so if you
-  don't). A clip that had to wait behind another download checks for a live view
-  again once it gets its turn, so it refuses with the same message instead of
-  fighting a stream someone started meanwhile. A camera that answers **5405**
-  (another viewer, or a session the relay is still releasing) is retried twice,
-  two seconds apart, before the card reports "The camera refused to play the
-  recording"; if it still fails, close the EZVIZ app or the other live view.
+  don't). A camera that is busy is retried a couple of times before the card
+  reports that it refused to play; if it still fails, close the EZVIZ app or the
+  other live view.
 - **Time zone.** The SD index is in the camera's local time. The integration
   reads it in Home Assistant's time zone, so the two should match.
 - **Encrypted cameras.** A camera with video encryption on needs its
   verification code under **Configure → Verification codes**, as for the live
   view; the recording is decrypted with it.
 
-### How it works
-
-The list comes from the cloud's SD index (`/v3/streaming/v2/records`, the
-endpoint behind the app's playback timeline): at most 50 recordings per
-answer, oldest first, so the integration pages forward through the day.
-Playback asks the VTM relay — the same relay as the live view — to stream the
-chosen interval from the SD card; the integration collects it as MPEG-PS,
-converts it with ffmpeg to an MP4 with the index at the front, and serves it to
-the card from an authenticated view that supports range requests (seeking).
-The MP4 is kept under `media/ezviz_rtsp/<year>/<month>/<day>/` (see [How long
-they stay](#what-it-costs-and-what-to-expect)), so a second play doesn't wake the
-camera again. The card reaches the file through a short-lived signed path,
-handed out by the websocket command that prepared it.
-
-Two websocket commands carry it, for anyone building their own UI:
-
-| Command | Data | Returns |
-|---|---|---|
-| `ezviz_rtsp/recordings` | `serial`, optional `date` (`YYYY-MM-DD`, local; today by default), optional `refresh` | `date`, `today`, `complete`, and `recordings`: newest first, each with `begin`/`end` (UTC, `20261110T083702Z`), `start` (local ISO time) and `seconds` |
-| `ezviz_rtsp/recording/clip` | `serial`, `begin`, `end`, optional `format` (`h264` default, or `hevc`) | `url`: a signed path to the MP4, valid for an hour; waits until the clip is ready |
-
-Recordings use **pyezvizapi 2.x** (2.5.1 is bundled), the first line of releases
-with SD playback over the cloud relay; see the [changelog](CHANGELOG.md).
+---
 
 ## Feeding other apps (Frigate, go2rtc, …)
 
@@ -644,58 +555,6 @@ authenticated picture view instead):
 ```
 http://<your-ha>:8123/api/ezviz_rtsp/mjpeg/<serial>?token=<stream token>
 ```
-
----
-
-## The bundled pyezvizapi
-
-This integration needs a **2.x `pyezvizapi`** for SD-card playback over the
-cloud relay, while Home Assistant's built-in EZVIZ integration pins 1.x. Home
-Assistant installs every integration's Python requirements into one environment,
-so it can hold only one version of a package — and a custom integration that
-requires a version the built-in one rules out is exactly what hassfest flags.
-
-To avoid that, this integration **ships its own copy** of `pyezvizapi` 2.5.1
-inside `custom_components/ezviz_rtsp/pyezvizapi/` and imports it from there. It
-does **not** list `pyezvizapi` in its `requirements`, so Home Assistant never
-installs or replaces it, and this integration can run **next to** the built-in
-EZVIZ integration — or any other integration that uses `pyezvizapi` — without a
-version conflict.
-
-The bundled copy is the upstream package **unchanged**, except that its internal
-imports point at the bundled location. Its own runtime dependencies
-(`paho-mqtt`, `pycryptodome`, `tzdata`, `xmltodict`) are listed in the manifest
-and installed normally; `requests` and `cryptography` come with Home Assistant.
-
-To update the library, run **`scripts/vendor_pyezvizapi.sh <version>`**: it
-fetches that release from PyPI, drops it in, and rewrites its import root (pass
-a path to an already-unpacked folder instead of a version to copy that).
-
----
-
-## Under the hood
-
-A quick sketch, for the curious:
-
-```
- camera ──(sleeps)──┐
-                    │  EZVIZ cloud wakes it on demand
-                    ▼
-        EZVIZ VTM relay ──► LiveSource (worker thread, pyezvizapi)
-                                    │
-                    MPEG-PS frames  │  pack-split, optional H.265/AES decrypt
-                                    ▼
-                              LiveStream (one per camera, shared)
-                                    │
-                ┌───────────────────┴────────────────────┐
-     LiveStreamView (MPEG-TS)                  MJPEG views (live JPEG)
-      ├─ HA stream worker ──► HLS (H.264)      ├─ the bundled card (signed URL)
-      └─ other apps (go2rtc, Frigate …)        └─ a <img> (stream token, opt-in)
-```
-
-The whole stream is opened lazily — the first thing that asks for it starts it,
-and it closes a few seconds after the last reader leaves. Nothing polls a
-sleeping camera in the background.
 
 ---
 
@@ -756,8 +615,8 @@ Re-check it under **Configure → Verification codes**.
 <details>
 <summary>The recordings view says the camera did not answer in time</summary>
 
-The camera was asleep and didn't answer the SD search (EZVIZ error 2009); the
-integration already asked twice. Press refresh — it is usually awake by then.
+The camera was asleep and didn't answer the SD search; the integration already
+asked twice. Press refresh — it is usually awake by then.
 
 </details>
 
@@ -766,20 +625,11 @@ integration already asked twice. Press refresh — it is usually awake by then.
 
 The length in the list comes from the camera's SD index. A file saved by an
 older version may have been cut off by the fixed transfer window: the card reads
-the MP4's real duration, and if it is clearly shorter than the interval (more
-than about two and a half seconds, or 5% of a long clip, which covers the camera
-closing an event file a little early), fetches the recording again
-automatically. A clip the camera itself sends short is kept as it is, and that
-verdict is remembered in Home Assistant's `.storage`, so a restart does not
-fetch it again. Such a row shows an orange alert
-cloud, and while it is fetched again the card says **"The saved recording is
-incomplete — downloading it again…"**. The transfer window now grows with the
-recording, so a long clip is not cut off while it is still arriving. Once a
-clip plays, the row shows the file's real duration, with the listed length in
-its tooltip when they differ. If a clip is still much shorter, the camera itself
-sent a shorter file; the integration log
-(`custom_components.ezviz_rtsp.recordings`) says how many seconds it received
-and how many the index listed.
+the MP4's real duration, and if it is clearly shorter than the interval it
+fetches the recording again automatically. A clip the camera itself sends short
+is kept as it is, and that verdict is remembered across restarts. Such a row
+shows an orange alert cloud, and while it is fetched again the card says **"The
+saved recording is incomplete — downloading it again…"**.
 
 </details>
 
@@ -788,8 +638,8 @@ and how many the index listed.
 
 "The camera refused to play the recording" means another session still has the
 camera — its live view in Home Assistant or the EZVIZ app. The integration
-already retries twice, two seconds apart; if it still fails, stop that session
-and tap again. If an HEVC recording stays black, set `format: h264` on the card.
+already retries a couple of times; if it still fails, stop that session and tap
+again. If an HEVC recording stays black, set `format: h264` on the card.
 
 </details>
 
@@ -823,6 +673,14 @@ in [`NOTICE`](NOTICE).
 
 EZVIZ is a trademark of its owner. This is an independent, unofficial project
 with no affiliation to or endorsement from EZVIZ.
+
+---
+
+## For developers
+
+How the live and playback streams are built, the websocket API, the cache and
+storage keys, the EZVIZ error codes it retries, and how the bundled `pyezvizapi`
+is refreshed: see **[docs/TECHNICAL.md](docs/TECHNICAL.md)**.
 
 ---
 

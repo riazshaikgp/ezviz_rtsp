@@ -285,6 +285,12 @@ This project follows [Semantic Versioning](https://semver.org/).
   the dot means.
 
 ### Changed
+- **The README is user-facing only.** The implementation notes — the stream
+  architecture, the websocket API, the cache and storage keys, the EZVIZ error
+  codes it retries, and how the bundled `pyezvizapi` is refreshed — moved to
+  [docs/TECHNICAL.md](docs/TECHNICAL.md), leaving the README with what a user
+  needs: what it does, how to install and set it up, and what each setting and
+  card option means.
 - **Downloaded recordings are kept per account.** The retention setting under
   **Configure → Downloaded recordings** now applies to the cameras of the
   account it is set on, not to the whole media folder, so two EZVIZ accounts can
