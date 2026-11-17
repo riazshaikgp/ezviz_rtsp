@@ -11,11 +11,11 @@ from homeassistant.components.switch import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from pyezvizapi.constants import DeviceSwitchType, SupportExt
-from pyezvizapi.exceptions import HTTPError, PyEzvizError
 
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
 from .entity import EzvizEntity
+from .pyezvizapi.constants import DeviceSwitchType, SupportExt
+from .pyezvizapi.exceptions import HTTPError, PyEzvizError
 
 
 @dataclass(frozen=True, kw_only=True)

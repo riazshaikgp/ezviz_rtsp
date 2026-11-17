@@ -36,15 +36,13 @@ It is a fork of the **built-in** EZVIZ integration, so everything that one
 does still works here. It lives under its own domain, `ezviz_rtsp`, which means
 it sits **next to** the built-in one instead of replacing it.
 
-> **One shared library.** This integration and the built-in EZVIZ one are
-> separate integrations, but they use the same Python package, `pyezvizapi`,
-> and Home Assistant can install only one version of it. This one needs
-> `pyezvizapi` 2.x (for SD-card playback), while the built-in one pins 1.x. So
-> **only one of the two can be active**: ignore or remove the built-in EZVIZ
-> integration, and keep this one. The same applies to any other integration
-> that pins a different `pyezvizapi` version — Home Assistant shows a **Repairs**
-> issue naming it when that happens. See
-> [Conflicts with other integrations](#conflicts-with-other-integrations).
+> **A bundled library.** This integration and the built-in EZVIZ one are
+> separate integrations. Unlike the built-in one, this one needs a 2.x
+> `pyezvizapi` (for SD-card playback), so it **ships its own copy** of
+> `pyezvizapi` 2.5.1 inside the integration and does not ask Home Assistant to
+> install the package. That means it can run **next to** the built-in EZVIZ
+> integration, or any other integration that uses `pyezvizapi`, without a version
+> conflict. See [The bundled pyezvizapi](#the-bundled-pyezvizapi).
 
 ---
 
@@ -617,7 +615,7 @@ Two websocket commands carry it, for anyone building their own UI:
 | `ezviz_rtsp/recordings` | `serial`, optional `date` (`YYYY-MM-DD`, local; today by default), optional `refresh` | `date`, `today`, `complete`, and `recordings`: newest first, each with `begin`/`end` (UTC, `20261110T083702Z`), `start` (local ISO time) and `seconds` |
 | `ezviz_rtsp/recording/clip` | `serial`, `begin`, `end`, optional `format` (`h264` default, or `hevc`) | `url`: a signed path to the MP4, valid for an hour; waits until the clip is ready |
 
-Recordings need **pyezvizapi 2.x** (2.5.1 is pinned), the first line of releases
+Recordings use **pyezvizapi 2.x** (2.5.1 is bundled), the first line of releases
 with SD playback over the cloud relay; see the [changelog](CHANGELOG.md).
 
 ## Feeding other apps (Frigate, go2rtc, …)
@@ -649,27 +647,26 @@ http://<your-ha>:8123/api/ezviz_rtsp/mjpeg/<serial>?token=<stream token>
 
 ---
 
-## Conflicts with other integrations
+## The bundled pyezvizapi
 
-This integration needs **`pyezvizapi` 2.x**. Home Assistant installs every
-integration's Python requirements into one environment, so it can hold only one
-version of a package. If another enabled integration pins a `pyezvizapi` version
-that does not include the installed one, Home Assistant reinstalls a version for
-whichever integration it processes last, and the other one may then run against
-the wrong library.
+This integration needs a **2.x `pyezvizapi`** for SD-card playback over the
+cloud relay, while Home Assistant's built-in EZVIZ integration pins 1.x. Home
+Assistant installs every integration's Python requirements into one environment,
+so it can hold only one version of a package — and a custom integration that
+requires a version the built-in one rules out is exactly what hassfest flags.
 
-The usual case is the **built-in EZVIZ** integration, which pins `pyezvizapi`
-1.x: ignore or remove it (Settings → Devices & services → EZVIZ → Ignore) and
-keep this one. The same goes for any other integration that requires a different
-version.
+To avoid that, this integration **ships its own copy** of `pyezvizapi` 2.5.1
+inside `custom_components/ezviz_rtsp/pyezvizapi/` and imports it from there. It
+does **not** list `pyezvizapi` in its `requirements`, so Home Assistant never
+installs or replaces it, and this integration can run **next to** the built-in
+EZVIZ integration — or any other integration that uses `pyezvizapi` — without a
+version conflict.
 
-This integration looks for such integrations at start-up and, when it finds one,
-shows a **Repairs** issue that names it (Settings → System → Repairs). The issue
-clears once the conflicting integration is ignored or removed.
-
-Two integrations can share the package when their requirements overlap — for
-example, another one that accepts `pyezvizapi>=2`. Only a genuinely different
-version conflicts.
+The bundled copy is the upstream package **unchanged**, except that its internal
+imports point at the bundled location. Its own runtime dependencies
+(`paho-mqtt`, `pycryptodome`, `tzdata`, `xmltodict`) are listed in the manifest
+and installed normally; `requests` and `cryptography` come with Home Assistant.
+To update the library, replace that folder with a newer release.
 
 ---
 

@@ -35,15 +35,6 @@ from homeassistant.helpers.selector import (
     TextSelectorConfig,
     TextSelectorType,
 )
-from pyezvizapi.client import EzvizClient
-from pyezvizapi.exceptions import (
-    AuthTestResultFailed,
-    EzvizAuthVerificationCode,
-    InvalidHost,
-    InvalidURL,
-    PyEzvizError,
-)
-from pyezvizapi.test_cam_rtsp import TestRTSPAuth
 
 from .const import (
     ATTR_SERIAL,
@@ -76,6 +67,15 @@ from .const import (
 )
 from .coordinator import EzvizConfigEntry
 from .live import LINGER, MAX_SESSION, uses_cloud_stream
+from .pyezvizapi.client import EzvizClient
+from .pyezvizapi.exceptions import (
+    AuthTestResultFailed,
+    EzvizAuthVerificationCode,
+    InvalidHost,
+    InvalidURL,
+    PyEzvizError,
+)
+from .pyezvizapi.test_cam_rtsp import TestRTSPAuth
 
 # A form-only field: it is not stored, it just asks for a new token on save.
 CONF_ROTATE_TOKEN = "rotate_token"

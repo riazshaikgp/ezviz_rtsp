@@ -911,7 +911,7 @@ def search_day(
     request starts one second after the last record seen. The second value says
     whether the whole day was read (False when the page budget ran out).
     """
-    from pyezvizapi.exceptions import PyEzvizError
+    from .pyezvizapi.exceptions import PyEzvizError
 
     start = datetime.combine(day, datetime.min.time(), tz)
     end = min(start + timedelta(days=1), now.astimezone(tz).replace(microsecond=0))
@@ -1082,7 +1082,7 @@ def day_has_records(
     instead of paging a whole day. A sleeping camera's first search is retried
     like the day list's.
     """
-    from pyezvizapi.exceptions import PyEzvizError
+    from .pyezvizapi.exceptions import PyEzvizError
 
     start = datetime.combine(day, datetime.min.time(), tz)
     end = min(start + timedelta(days=1), now.astimezone(tz).replace(microsecond=0))
@@ -1259,8 +1259,8 @@ def _open_playback(
     live view the card just stopped. Retrying a couple of times turns that into
     a short wait instead of an error the user has to act on.
     """
-    from pyezvizapi.exceptions import EzvizPlaybackNegotiationError
-    from pyezvizapi.streaming.cloud.playback import open_cloud_playback_stream
+    from .pyezvizapi.exceptions import EzvizPlaybackNegotiationError
+    from .pyezvizapi.streaming.cloud.playback import open_cloud_playback_stream
 
     last: EzvizPlaybackNegotiationError | None = None
     for attempt in range(1, PLAYBACK_ATTEMPTS + 1):
@@ -1371,7 +1371,7 @@ def _read_playback(
     stream: Any, deadline: float, on_progress: Callable[[float | None], None] | None = None
 ) -> bytearray:
     """Read one playback stream to its end (or until ``deadline``). Blocking."""
-    from pyezvizapi.streaming.cloud.protocol import VtmStreamEOF, VtmStreamTimeout
+    from .pyezvizapi.streaming.cloud.protocol import VtmStreamEOF, VtmStreamTimeout
 
     data = bytearray()
     pts = _VideoPts()
@@ -1411,7 +1411,7 @@ def _read_playback(
 
 def _delivered_seconds(data: bytes) -> float | None:
     """The video PTS span of a captured MPEG-PS clip, when it can be measured."""
-    from pyezvizapi.streaming.media.mpegps import mpeg_ps_video_pts_span_seconds
+    from .pyezvizapi.streaming.media.mpegps import mpeg_ps_video_pts_span_seconds
 
     return mpeg_ps_video_pts_span_seconds(data, max_gap_seconds=2.0)
 
@@ -1447,8 +1447,8 @@ def _download_clip(
     The longest read of every attempt is kept: a retry that fails, or comes back
     even shorter, must not throw away a nearly complete first read.
     """
-    from pyezvizapi.exceptions import EzvizPlaybackNegotiationError, PyEzvizError
-    from pyezvizapi.streaming.cloud.protocol import decrypt_hikvision_ps_video
+    from .pyezvizapi.exceptions import EzvizPlaybackNegotiationError, PyEzvizError
+    from .pyezvizapi.streaming.cloud.protocol import decrypt_hikvision_ps_video
 
     wanted = (parse_stamp(end) - parse_stamp(begin)).total_seconds()
     budget = _transfer_budget(wanted)

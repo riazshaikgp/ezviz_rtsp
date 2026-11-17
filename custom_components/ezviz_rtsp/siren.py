@@ -15,10 +15,10 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import event as evt
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from pyezvizapi import HTTPError, PyEzvizError, SupportExt
 
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
 from .entity import EzvizBaseEntity
+from .pyezvizapi import HTTPError, PyEzvizError, SupportExt
 
 PARALLEL_UPDATES = 1
 OFF_DELAY = timedelta(seconds=60)  # Camera firmware has hard coded turn off.

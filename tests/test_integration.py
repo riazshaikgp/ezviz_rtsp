@@ -6,9 +6,7 @@ from unittest.mock import patch
 
 import pytest
 from homeassistant.components.camera import CameraEntityFeature
-from homeassistant.config_entries import SOURCE_IGNORE
 from homeassistant.const import CONF_TYPE, CONF_URL, Platform
-from homeassistant.helpers import issue_registry as ir
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ezviz_rtsp.const import (
@@ -241,34 +239,6 @@ async def test_request_snapshot_button_updates_the_snapshot_image(hass) -> None:
     state = hass.states.get(snapshot_id)
     assert state.state != "unknown"
     assert state.attributes.get("entity_picture")
-
-
-async def test_conflicting_pyezvizapi_integration_raises_a_repair_issue(hass) -> None:
-    from custom_components.ezviz_rtsp import PYEZVIZAPI_CONFLICT_ISSUE
-
-    # The built-in ezviz pins pyezvizapi 1.x while this integration needs 2.x.
-    MockConfigEntry(domain="ezviz").add_to_hass(hass)
-    await _setup(hass)
-
-    assert ir.async_get(hass).async_get_issue(DOMAIN, PYEZVIZAPI_CONFLICT_ISSUE) is not None
-
-
-async def test_integration_without_pyezvizapi_leaves_no_issue(hass) -> None:
-    from custom_components.ezviz_rtsp import PYEZVIZAPI_CONFLICT_ISSUE
-
-    MockConfigEntry(domain="hue").add_to_hass(hass)
-    await _setup(hass)
-
-    assert ir.async_get(hass).async_get_issue(DOMAIN, PYEZVIZAPI_CONFLICT_ISSUE) is None
-
-
-async def test_ignored_conflicting_integration_leaves_no_issue(hass) -> None:
-    from custom_components.ezviz_rtsp import PYEZVIZAPI_CONFLICT_ISSUE
-
-    MockConfigEntry(domain="ezviz", source=SOURCE_IGNORE).add_to_hass(hass)
-    await _setup(hass)
-
-    assert ir.async_get(hass).async_get_issue(DOMAIN, PYEZVIZAPI_CONFLICT_ISSUE) is None
 
 
 async def test_card_file_is_served(hass, hass_client) -> None:

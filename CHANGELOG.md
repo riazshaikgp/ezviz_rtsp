@@ -303,17 +303,17 @@ This project follows [Semantic Versioning](https://semver.org/).
   `async_ps_to_jpeg`, `_ffmpeg`) are removed, and the battery-camera and
   RTSP-entry predicates that `camera.py` and `live.py` each spelled out are now
   single helpers.
-- Requires **pyezvizapi 2.5.1** (was 1.0.5.0). 2.0.0 added SD playback through
-  the cloud relay, which the recordings need; 2.5.1 is the current release of
-  that line and resolves cleanly against Home Assistant's own constraints (it
-  leaves `requests`, `cryptography`, `paho-mqtt` and `pycryptodome` unpinned, so
-  Home Assistant's versions are used). The live view follows the new module
-  layout (`pyezvizapi.streaming.cloud`; 2.0.0 removed
-  `pyezvizapi.cloud_stream`). Home Assistant installs it on the next start.
-- **A Repairs warning for a conflicting `pyezvizapi`.** At start-up the
-  integration names any other enabled integration that pins a `pyezvizapi`
-  version it cannot share (the built-in `ezviz` integration, which pins 1.x, is
-  the usual one), so it is clear which one to ignore or remove.
+- **`pyezvizapi` 2.5.1 is now bundled, not installed.** SD-card playback needs a
+  2.x `pyezvizapi`, but Home Assistant's built-in EZVIZ integration pins 1.x, and
+  one environment can hold only one version — a clash that hassfest reports. The
+  integration now ships its own copy of `pyezvizapi` 2.5.1 under
+  `custom_components/ezviz_rtsp/pyezvizapi/` and imports it from there, so it no
+  longer lists `pyezvizapi` in `requirements` and runs happily next to the
+  built-in EZVIZ integration (or any other integration that uses `pyezvizapi`).
+  The copy is the upstream package unchanged except for its import root; its own
+  runtime dependencies (`paho-mqtt`, `pycryptodome`, `tzdata`, `xmltodict`) are
+  declared in the manifest. The live view follows the 2.x module layout
+  (`pyezvizapi.streaming.cloud`; 2.0.0 removed `pyezvizapi.cloud_stream`).
 - **Taps that come faster than the camera now favour the newest recording.**
   While one clip is being fetched, tapping another only remembers the latest:
   the recordings in between are not downloaded at all, so the camera is not

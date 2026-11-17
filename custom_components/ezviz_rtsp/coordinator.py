@@ -9,16 +9,16 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from pyezvizapi.client import EzvizClient
-from pyezvizapi.exceptions import (
+
+from .const import DOMAIN
+from .pyezvizapi.client import EzvizClient
+from .pyezvizapi.exceptions import (
     EzvizAuthTokenExpired,
     EzvizAuthVerificationCode,
     HTTPError,
     InvalidURL,
     PyEzvizError,
 )
-
-from .const import DOMAIN
 
 if TYPE_CHECKING:
     from .live import LiveStream

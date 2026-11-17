@@ -10,11 +10,11 @@ from homeassistant.util.percentage import (
     percentage_to_ranged_value,
     ranged_value_to_percentage,
 )
-from pyezvizapi.constants import DeviceCatagories, DeviceSwitchType, SupportExt
-from pyezvizapi.exceptions import HTTPError, PyEzvizError
 
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
 from .entity import EzvizEntity
+from .pyezvizapi.constants import DeviceCatagories, DeviceSwitchType, SupportExt
+from .pyezvizapi.exceptions import HTTPError, PyEzvizError
 
 PARALLEL_UPDATES = 1
 BRIGHTNESS_RANGE = (1, 255)

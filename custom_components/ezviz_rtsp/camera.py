@@ -23,8 +23,6 @@ from homeassistant.helpers.entity_platform import (
     AddConfigEntryEntitiesCallback,
     async_get_current_platform,
 )
-from pyezvizapi.exceptions import HTTPError, InvalidHost, PyEzvizError
-from pyezvizapi.utils import decrypt_image
 
 from .const import (
     ATTR_AUTOMATIC,
@@ -50,12 +48,14 @@ from .const import (
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
 from .entity import EzvizEntity
 from .live import LiveStream, is_battery_camera, rtsp_entry, stream_source
+from .pyezvizapi.exceptions import HTTPError, InvalidHost, PyEzvizError
+from .pyezvizapi.utils import decrypt_image
 from .recordings import FORMATS, RecordingError, async_download_latest, find_camera
 
 try:
     # pyezvizapi's own parser for capture responses (used by EzvizClient.save_image); it accepts
     # picUrl, picURL, imageUrl, captureUrl, ... It is private, so keep a fallback in case it moves.
-    from pyezvizapi.client import _first_image_url
+    from .pyezvizapi.client import _first_image_url
 except ImportError:  # pragma: no cover
 
     def _first_image_url(value: object) -> str | None:

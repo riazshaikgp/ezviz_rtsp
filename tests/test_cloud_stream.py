@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
-from pyezvizapi.exceptions import PyEzvizError
 
 from custom_components.ezviz_rtsp import live
 from custom_components.ezviz_rtsp.cloud_stream import (
@@ -30,6 +29,7 @@ from custom_components.ezviz_rtsp.live import (
     stream_source,
     uses_cloud_stream,
 )
+from custom_components.ezviz_rtsp.pyezvizapi.exceptions import PyEzvizError
 from custom_components.ezviz_rtsp.recordings import (
     DATA_RECORDINGS,
     RecordingStore,

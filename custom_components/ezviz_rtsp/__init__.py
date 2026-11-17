@@ -2,30 +2,17 @@
 
 import asyncio
 import hashlib
-import importlib.metadata
 import logging
 from pathlib import Path
 
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http.server import StaticPathConfig
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
-from homeassistant.config_entries import SOURCE_IGNORE
 from homeassistant.const import CONF_TIMEOUT, CONF_TYPE, CONF_URL, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers import issue_registry as ir
-from homeassistant.loader import IntegrationNotFound, async_get_integration
-from packaging.requirements import InvalidRequirement, Requirement
-from packaging.version import Version
-from pyezvizapi.client import EzvizClient
-from pyezvizapi.exceptions import (
-    EzvizAuthTokenExpired,
-    EzvizAuthVerificationCode,
-    HTTPError,
-    InvalidURL,
-    PyEzvizError,
-)
+from homeassistant.loader import async_get_integration
 
 from .const import (
     ATTR_TYPE_CAMERA,
@@ -46,16 +33,17 @@ from .const import (
 )
 from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
 from .live import async_close_live_streams, async_setup_live_streams
+from .pyezvizapi.client import EzvizClient
+from .pyezvizapi.exceptions import (
+    EzvizAuthTokenExpired,
+    EzvizAuthVerificationCode,
+    HTTPError,
+    InvalidURL,
+    PyEzvizError,
+)
 from .recordings import async_close_store, async_setup_recordings
 
 _LOGGER = logging.getLogger(__name__)
-
-# Every integration shares one Python environment, and therefore one version of
-# each package. This integration needs a 2.x pyezvizapi; another integration that
-# pins a version the installed one does not satisfy makes Home Assistant reinstall
-# a version for whichever integration it processes last.
-PYEZVIZAPI_PACKAGE = "pyezvizapi"
-PYEZVIZAPI_CONFLICT_ISSUE = "pyezvizapi_conflict"
 
 PLATFORMS_BY_TYPE: dict[str, list] = {
     ATTR_TYPE_CAMERA: [],
@@ -115,88 +103,6 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         hass.data[DATA_CARD] = True
 
 
-def _installed_pyezvizapi() -> Version | None:
-    """The version of pyezvizapi this Home Assistant actually has installed."""
-    try:
-        return Version(importlib.metadata.version(PYEZVIZAPI_PACKAGE))
-    except importlib.metadata.PackageNotFoundError:
-        return None
-
-
-def _pyezvizapi_requirement(requirements: list[str]) -> Requirement | None:
-    """The pyezvizapi requirement among an integration's manifest requirements."""
-    for requirement in requirements:
-        try:
-            parsed = Requirement(requirement)
-        except InvalidRequirement:
-            continue
-        if parsed.name == PYEZVIZAPI_PACKAGE:
-            return parsed
-    return None
-
-
-async def _async_warn_about_pyezvizapi_conflicts(hass: HomeAssistant) -> None:
-    """Raise a Repairs issue for any integration that needs a different pyezvizapi.
-
-    Every integration is installed into one Python environment, so only one
-    version of ``pyezvizapi`` can exist. If another enabled integration pins a
-    version the installed one does not satisfy, Home Assistant reinstalls a
-    version for whichever integration it processes last, and the other one may
-    then run against the wrong library. This is not specific to the built-in
-    ``ezviz`` integration: any integration that requires a different version of
-    the package conflicts the same way.
-    """
-    # Reading the installed version touches the filesystem; keep it off the loop.
-    installed = await hass.async_add_executor_job(_installed_pyezvizapi)
-    if installed is None:
-        return
-
-    conflicts: list[str] = []
-    seen: set[str] = set()
-    for entry in hass.config_entries.async_entries():
-        domain = entry.domain
-        # Only entries that will actually be set up can install requirements.
-        if domain == DOMAIN or domain in seen:
-            continue
-        if entry.source == SOURCE_IGNORE or entry.disabled_by is not None:
-            continue
-        seen.add(domain)
-        try:
-            integration = await async_get_integration(hass, domain)
-        except IntegrationNotFound:
-            continue
-        requirement = _pyezvizapi_requirement(
-            integration.manifest.get("requirements") or []
-        )
-        if requirement is None:
-            continue
-        if requirement.specifier.contains(installed, prereleases=True):
-            continue
-        conflicts.append(f"{integration.name} ({requirement})")
-
-    if not conflicts:
-        ir.async_delete_issue(hass, DOMAIN, PYEZVIZAPI_CONFLICT_ISSUE)
-        return
-
-    listed = ", ".join(sorted(conflicts))
-    _LOGGER.warning(
-        "These integrations pin a %s version that is not installed and will "
-        "fight over the shared package: %s",
-        PYEZVIZAPI_PACKAGE,
-        listed,
-    )
-    ir.async_create_issue(
-        hass,
-        DOMAIN,
-        PYEZVIZAPI_CONFLICT_ISSUE,
-        is_fixable=False,
-        severity=ir.IssueSeverity.WARNING,
-        translation_key=PYEZVIZAPI_CONFLICT_ISSUE,
-        translation_placeholders={"integrations": listed},
-        learn_more_url="https://github.com/tarasifua/ezviz_rtsp",
-    )
-
-
 async def async_setup_entry(hass: HomeAssistant, entry: EzvizConfigEntry) -> bool:
     """Set up EZVIZ from a config entry."""
     sensor_type: str = entry.data[CONF_TYPE]
@@ -248,8 +154,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: EzvizConfigEntry) -> boo
         await _async_register_card(hass)
         # Sweep the downloaded clips now, and once a day while we run.
         await async_setup_recordings(hass)
-        # Warn if another integration needs a different version of pyezvizapi.
-        await _async_warn_about_pyezvizapi_conflicts(hass)
 
     # Check EZVIZ cloud account entity is present, reload
     # cloud account entities for camera entity change

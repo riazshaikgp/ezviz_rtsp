@@ -198,12 +198,6 @@
       }
     }
   },
-  "issues": {
-    "pyezvizapi_conflict": {
-      "title": "Another integration needs a different pyezvizapi",
-      "description": "{integrations} also uses the `pyezvizapi` package, but needs a version this integration does not have installed. Home Assistant installs one version of a package per environment, so after a restart one of the two may stop working. Ignore or remove that integration, or make sure both accept the same pyezvizapi version."
-    }
-  },
   "options": {
     "abort": {
       "no_cameras": "This account has no cloud-streamed cameras to set a code for."

@@ -18,11 +18,11 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from homeassistant.util import dt as dt_util
-from pyezvizapi.exceptions import PyEzvizError
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.ezviz_rtsp import recordings as rec_module
 from custom_components.ezviz_rtsp.const import DOMAIN, SIGNAL_RECORDING_DOWNLOADED
+from custom_components.ezviz_rtsp.pyezvizapi.exceptions import PyEzvizError
 from custom_components.ezviz_rtsp.recordings import (
     MAX_PAGES,
     PAGE_SIZE,
@@ -862,7 +862,7 @@ def _playback_stream(*results) -> MagicMock:
 def _patch_playback(monkeypatch, stream: MagicMock) -> MagicMock:
     opener = MagicMock(return_value=stream)
     monkeypatch.setattr(
-        "pyezvizapi.streaming.cloud.playback.open_cloud_playback_stream", opener
+        "custom_components.ezviz_rtsp.pyezvizapi.streaming.cloud.playback.open_cloud_playback_stream", opener
     )
     return opener
 
@@ -891,7 +891,7 @@ def test_playback_negotiation_retries_while_the_camera_is_busy(monkeypatch) -> N
 
 
 def test_playback_negotiation_does_not_retry_another_refusal(monkeypatch) -> None:
-    from pyezvizapi.exceptions import EzvizPlaybackNegotiationError
+    from custom_components.ezviz_rtsp.pyezvizapi.exceptions import EzvizPlaybackNegotiationError
 
     stream = _playback_stream(4001)
     opener = _patch_playback(monkeypatch, stream)
@@ -913,7 +913,7 @@ def test_playback_negotiation_does_not_retry_another_refusal(monkeypatch) -> Non
 
 
 def test_playback_negotiation_gives_up_when_the_camera_stays_busy(monkeypatch) -> None:
-    from pyezvizapi.exceptions import EzvizPlaybackNegotiationError
+    from custom_components.ezviz_rtsp.pyezvizapi.exceptions import EzvizPlaybackNegotiationError
 
     stream = _playback_stream(*[rec_module.BUSY_RESULT_CODE] * rec_module.PLAYBACK_ATTEMPTS)
     opener = _patch_playback(monkeypatch, stream)
@@ -1156,7 +1156,7 @@ def test_a_short_download_is_fetched_once_more(monkeypatch) -> None:
 
 def test_a_failed_retry_keeps_the_first_read(monkeypatch) -> None:
     """A short first read must survive a retry that then fails."""
-    from pyezvizapi.exceptions import PyEzvizError
+    from custom_components.ezviz_rtsp.pyezvizapi.exceptions import PyEzvizError
 
     opener = MagicMock(side_effect=[MagicMock(), PyEzvizError("the relay dropped")])
     monkeypatch.setattr(rec_module, "_open_playback", opener)
@@ -1204,7 +1204,7 @@ def test_a_shorter_retry_does_not_replace_a_longer_read(monkeypatch) -> None:
 
 
 def test_two_failed_reads_raise(monkeypatch) -> None:
-    from pyezvizapi.exceptions import PyEzvizError
+    from custom_components.ezviz_rtsp.pyezvizapi.exceptions import PyEzvizError
 
     monkeypatch.setattr(rec_module, "_open_playback", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(

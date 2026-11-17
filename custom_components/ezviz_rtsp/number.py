@@ -10,17 +10,17 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from pyezvizapi.constants import SupportExt
-from pyezvizapi.exceptions import (
+
+from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
+from .entity import EzvizBaseEntity
+from .pyezvizapi.constants import SupportExt
+from .pyezvizapi.exceptions import (
     EzvizAuthTokenExpired,
     EzvizAuthVerificationCode,
     HTTPError,
     InvalidURL,
     PyEzvizError,
 )
-
-from .coordinator import EzvizConfigEntry, EzvizDataUpdateCoordinator
-from .entity import EzvizBaseEntity
 
 SCAN_INTERVAL = timedelta(seconds=3600)
 PARALLEL_UPDATES = 0
